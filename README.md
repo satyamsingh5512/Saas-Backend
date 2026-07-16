@@ -96,3 +96,4 @@ Use the returned `token` as `Authorization: Bearer <token>` on protected routes.
 - `JWT_SECRET` must be set to a long random value before running outside local dev. The app logs a warning if it's empty.
 - Tenant scoping is derived exclusively from the validated JWT, never from request bodies/params, to prevent cross-tenant data access.
 - `/api/v1/auth/*` endpoints are rate-limited per-IP (20 req/min, burst 5) via an in-memory token bucket (`internal/middleware/ratelimit.go`) to slow down brute force/credential stuffing. This is in-memory and per-instance; for multi-instance deployments behind a load balancer, replace with a shared store (e.g. Redis-backed limiter).
+# Saas-Backend
