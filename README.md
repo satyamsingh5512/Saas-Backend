@@ -2,98 +2,172 @@
 
 Multi-tenant SaaS API backend built with Go, Gin, GORM, and PostgreSQL.
 
-## Stack
+This README is written as a system design document with GitHub-rendered diagrams
+(Mermaid), so architecture is visible directly on the repository page.
 
-- **Language:** Go 1.26
-- **Framework:** Gin
-- **ORM:** GORM (PostgreSQL driver)
-- **Auth:** JWT (HS256) + bcrypt password hashing
-- **Multi-tenancy:** shared database, `tenant_id` column scoping enforced via JWT claims (no client-supplied tenant IDs are trusted)
+## 1) What This Project Does
 
-## Project structure
+`Tenant-Saas-Backend` provides a secure backend for SaaS applications where many
+tenants (organizations) share one application instance and one database.
 
-```
-cmd/server/main.go          entrypoint
-internal/config/            env config loading
-internal/db/                DB connection + migrations
-internal/models/            GORM models (Tenant, User)
-internal/auth/               JWT + password hashing helpers
-internal/middleware/        auth middleware (JWT validation, role checks)
-internal/handlers/          HTTP handlers (auth, users, health)
-internal/routes/            route registration
-```
+Core capabilities:
 
-## Setup
+- Tenant onboarding: create tenant + first admin user.
+- Authentication: login and receive JWT token.
+- Authorization: protect APIs and enforce role-based access.
+- Tenant isolation: every protected query is scoped to the tenant in JWT claims.
+- Health and operational readiness endpoints for local/dev deployment.
 
-1. Copy `.env.example` to `.env` and fill in values (especially `JWT_SECRET`):
-   ```
-   cp .env.example .env
-   ```
+## 2) High-Level Architecture
 
-2. Start PostgreSQL locally (via Docker Compose):
-   ```
-   make db-up
-   ```
-
-3. Run the server:
-   ```
-   make run
-   ```
-
-The server starts on `http://localhost:8080` (configurable via `PORT`).
-
-## Development
-
-```
-make build          # build binary to ./bin/server
-make test           # run unit + integration tests
-make test-verbose   # run tests with verbose output
-make vet            # go vet
-make fmt            # gofmt
-make db-up/db-down  # manage local Postgres container
+```mermaid
+flowchart LR
+      C[Client App or API Consumer] --> R[HTTP Router\ninternal/routes]
+      R --> MW[Middleware Layer\nJWT Auth + Rate Limit]
+      MW --> H[Handlers\nAuth / Users / Health]
+      H --> A[Auth Utils\nJWT + Password Hashing]
+      H --> M[Models\nTenant, User]
+      H --> DB[(PostgreSQL)]
+      CFG[Config\ninternal/config] --> R
+      CFG --> H
+      DBX[DB Bootstrap\ninternal/db] --> DB
 ```
 
-Integration tests in `internal/handlers` require a reachable Postgres instance
-(configured the same way as the app, via `.env`/environment variables) and will
-automatically skip if the database is unavailable.
+## 3) Request Lifecycle (How It Works)
 
-## API
+```mermaid
+sequenceDiagram
+      participant U as User/Client
+      participant API as Gin API
+      participant MW as Auth Middleware
+      participant H as Handler
+      participant PG as PostgreSQL
 
-| Method | Path                  | Auth | Description                          |
-|--------|-----------------------|------|---------------------------------------|
-| GET    | /health               | no   | Liveness check                        |
-| POST   | /api/v1/auth/register | no   | Create a tenant + first admin user    |
-| POST   | /api/v1/auth/login    | no   | Log in, returns JWT                   |
-| GET    | /api/v1/me            | yes  | Current user's identity               |
-| GET    | /api/v1/users         | yes  | List users in the caller's tenant     |
+      U->>API: POST /api/v1/auth/login (email, password)
+      API->>H: Route to AuthHandler.Login
+      H->>PG: Lookup user by email
+      PG-->>H: User + tenant_id + password_hash
+      H->>H: Verify bcrypt password
+      H->>H: Issue JWT (user_id, tenant_id, role)
+      H-->>U: token
 
-### Register
-
+      U->>API: GET /api/v1/users + Bearer token
+      API->>MW: Validate JWT + extract claims
+      MW-->>API: Context contains tenant_id/user_id/role
+      API->>H: Route to UserHandler.List
+      H->>PG: SELECT users WHERE tenant_id = claims.tenant_id
+      PG-->>H: Tenant-scoped user list
+      H-->>U: 200 OK (only same-tenant users)
 ```
-POST /api/v1/auth/register
+
+## 4) Tenant Isolation Model
+
+```mermaid
+flowchart TD
+      T[Incoming Protected Request] --> J[JWT Validation]
+      J --> C{Token valid?}
+      C -- No --> X[401 Unauthorized]
+      C -- Yes --> CL[Extract tenant_id from claims]
+      CL --> Q[Run DB query with WHERE tenant_id = claims.tenant_id]
+      Q --> R[Return tenant-scoped response]
+```
+
+Design rule:
+
+- The backend never trusts tenant identifiers from request body/query/path for
+   authorization decisions.
+- Tenant context is derived from signed JWT claims only.
+
+## 5) Tech Stack
+
+| Layer | Technology |
+|---|---|
+| Language | Go 1.26 |
+| HTTP Framework | Gin |
+| ORM | GORM + PostgreSQL driver |
+| Database | PostgreSQL |
+| AuthN/AuthZ | JWT (HS256), role checks |
+| Password Security | bcrypt hashing |
+| Local Infra | Docker Compose |
+| Tooling | Makefile (`build`, `run`, `test`, `fmt`, `vet`) |
+
+## 6) Project Structure
+
+```text
+cmd/server/main.go               Application entrypoint
+internal/config/config.go        Environment-based configuration
+internal/db/db.go                DB connection and initialization
+internal/models/tenant.go        Tenant model
+internal/models/user.go          User model
+internal/auth/jwt.go             JWT generation and validation
+internal/auth/password.go        Password hash/verify helpers
+internal/middleware/auth.go      JWT/role middleware
+internal/middleware/ratelimit.go Rate limiter for auth endpoints
+internal/handlers/               HTTP handlers (auth, users, health)
+internal/routes/routes.go        Route registration
+```
+
+## 7) API Surface
+
+| Method | Path | Auth | Purpose |
+|---|---|---|---|
+| GET | `/health` | No | Liveness check |
+| POST | `/api/v1/auth/register` | No | Create tenant + first admin |
+| POST | `/api/v1/auth/login` | No | Authenticate and return JWT |
+| GET | `/api/v1/me` | Yes | Return caller identity |
+| GET | `/api/v1/users` | Yes | List users for caller tenant |
+
+### Example: Register
+
+```json
 {
-  "tenant_name": "Acme Inc",
-  "tenant_slug": "acme",
-  "email": "admin@acme.com",
-  "password": "supersecret123"
+   "tenant_name": "Acme Inc",
+   "tenant_slug": "acme",
+   "email": "admin@acme.com",
+   "password": "supersecret123"
 }
 ```
 
-### Login
+### Example: Login
 
-```
-POST /api/v1/auth/login
+```json
 {
-  "email": "admin@acme.com",
-  "password": "supersecret123"
+   "email": "admin@acme.com",
+   "password": "supersecret123"
 }
 ```
 
-Use the returned `token` as `Authorization: Bearer <token>` on protected routes.
+Use token as:
 
-## Notes / security
+```http
+Authorization: Bearer <token>
+```
 
-- `JWT_SECRET` must be set to a long random value before running outside local dev. The app logs a warning if it's empty.
-- Tenant scoping is derived exclusively from the validated JWT, never from request bodies/params, to prevent cross-tenant data access.
-- `/api/v1/auth/*` endpoints are rate-limited per-IP (20 req/min, burst 5) via an in-memory token bucket (`internal/middleware/ratelimit.go`) to slow down brute force/credential stuffing. This is in-memory and per-instance; for multi-instance deployments behind a load balancer, replace with a shared store (e.g. Redis-backed limiter).
-# Saas-Backend
+## 8) Local Setup
+
+```bash
+cp .env.example .env
+make db-up
+make run
+```
+
+Server default: `http://localhost:8080`.
+
+## 9) Development Commands
+
+```bash
+make build
+make test
+make test-verbose
+make vet
+make fmt
+make db-up
+make db-down
+```
+
+## 10) Security Notes
+
+- Set a strong `JWT_SECRET` before non-local use.
+- Auth endpoints are rate-limited (`20 req/min`, burst `5`) to reduce brute force risk.
+- Current rate limiter is in-memory per instance; for multi-instance deployments,
+   move to shared storage (for example Redis-backed rate limiting).
