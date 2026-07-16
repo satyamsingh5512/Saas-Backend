@@ -1,0 +1,6 @@
+.env
+*.tar.gz
+/bin/
+/tmp/
+*.log
+.DS_Store
