@@ -171,3 +171,49 @@ make db-down
 - Auth endpoints are rate-limited (`20 req/min`, burst `5`) to reduce brute force risk.
 - Current rate limiter is in-memory per instance; for multi-instance deployments,
    move to shared storage (for example Redis-backed rate limiting).
+
+
+## 11) Web Workspace
+
+The server includes a responsive, dark-mode workspace dashboard at `/`. Its
+light-purple visual system is embedded in the Go binary, so there is no separate
+frontend build, static-host deployment, or CORS configuration to maintain.
+
+The dashboard is wired to the existing API:
+
+- Create a tenant and first administrator with the **Create workspace** flow.
+- Sign in with the JWT-backed **Sign in** flow.
+- View the caller's scoped identity, workspace health, access role, and
+  tenant-isolated user directory.
+- JWTs are stored in browser `sessionStorage` and clear when the tab/session
+  closes. For a cross-device persistent session, implement secure HttpOnly
+  cookie authentication at the API layer.
+
+## 12) Production Container Deployment
+
+The included `Dockerfile` produces a minimal, non-root image containing both the
+Gin API and embedded workspace dashboard. Build and run it against your managed
+PostgreSQL instance by supplying the normal configuration environment variables:
+
+```bash
+docker build -t tenant-saas:latest .
+docker run --rm -p 8080:8080 \
+  -e APP_ENV=production \
+  -e DB_HOST=your-postgres-host \
+  -e DB_PASSWORD='use-a-secret-manager' \
+  -e DB_SSLMODE=require \
+  -e JWT_SECRET='use-a-long-random-secret' \
+  tenant-saas:latest
+```
+
+For an all-container deployment (appropriate for a private VM or non-production
+preview), set strong `DB_PASSWORD` and `JWT_SECRET` values in your deployment
+environment and run:
+
+```bash
+docker compose -f docker-compose.production.yml up -d --build
+```
+
+Do not expose the PostgreSQL service publicly. Put the application behind a TLS
+terminating reverse proxy or managed load balancer, set `DB_SSLMODE=require` for
+remote databases, and keep `JWT_SECRET` in your platform's secret manager.
