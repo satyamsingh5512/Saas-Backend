@@ -10,6 +10,9 @@ import (
 
 func main() {
 	cfg := config.Load()
+	if err := cfg.Validate(); err != nil {
+		log.Fatalf("invalid production configuration: %v", err)
+	}
 
 	database, err := db.Connect(cfg)
 	if err != nil {
