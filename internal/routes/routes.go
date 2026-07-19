@@ -1,6 +1,10 @@
 package routes
 
 import (
+	"embed"
+	"io/fs"
+	"net/http"
+
 	"github.com/gin-gonic/gin"
 	"github.com/satym-in/tenant-saas-backend/internal/config"
 	"github.com/satym-in/tenant-saas-backend/internal/handlers"
@@ -8,7 +12,21 @@ import (
 	"gorm.io/gorm"
 )
 
-// Setup wires up all routes and returns a configured gin.Engine.
+// webFiles packages the dashboard into the server binary, so the API and UI can
+// be deployed together without an additional web server or a CORS boundary.
+//
+//go:embed web/*
+var webFiles embed.FS
+
+func assetFileSystem() http.FileSystem {
+	assets, err := fs.Sub(webFiles, "web/assets")
+	if err != nil {
+		panic("embedded web assets are unavailable: " + err.Error())
+	}
+	return http.FS(assets)
+}
+
+// Setup wires up all API and embedded web routes and returns a configured gin.Engine.
 func Setup(db *gorm.DB, cfg *config.Config) *gin.Engine {
 	if cfg.Environment == "production" {
 		gin.SetMode(gin.ReleaseMode)
@@ -41,6 +59,16 @@ func Setup(db *gorm.DB, cfg *config.Config) *gin.Engine {
 			protected.GET("/users", userHandler.ListUsers)
 		}
 	}
+
+	dashboard, err := webFiles.ReadFile("web/index.html")
+	if err != nil {
+		panic("embedded dashboard is unavailable: " + err.Error())
+	}
+
+	router.GET("/", func(c *gin.Context) {
+		c.Data(http.StatusOK, "text/html; charset=utf-8", dashboard)
+	})
+	router.StaticFS("/assets", assetFileSystem())
 
 	return router
 }
