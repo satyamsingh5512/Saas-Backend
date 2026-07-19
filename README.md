@@ -217,3 +217,30 @@ docker compose -f docker-compose.production.yml up -d --build
 Do not expose the PostgreSQL service publicly. Put the application behind a TLS
 terminating reverse proxy or managed load balancer, set `DB_SSLMODE=require` for
 remote databases, and keep `JWT_SECRET` in your platform's secret manager.
+
+
+## 13) Render Deployment
+
+`render.yaml` defines a web service and a same-region Render Postgres database.
+It wires the database's private `connectionString` into `DATABASE_URL` and asks
+Render to generate a persistent `JWT_SECRET`; neither secret is committed to the
+repository. `DATABASE_URL` takes precedence over the individual `DB_*` settings.
+
+For a new deployment, create a **Blueprint** from the repository and review the
+service/database names, region, and paid plans in `render.yaml` before applying
+it. The service health check is `GET /health`.
+
+To fix an existing Render web service without recreating it:
+
+1. Create a Render Postgres instance in the same region as the web service.
+2. In the web service's **Environment** settings, set `DATABASE_URL` to the
+   database's **Internal Database URL** (not `localhost` and not the external URL).
+3. Set `JWT_SECRET` to a new random value of at least 32 characters. Do not reuse
+   the sample value in `.env.example`.
+4. Set `APP_ENV=production`, remove any stale `DB_HOST`, `DB_PORT`, `DB_USER`,
+   `DB_PASSWORD`, and `DB_NAME` overrides, then deploy the revision containing
+   `DATABASE_URL` support.
+
+The server now refuses to start in production with a missing/short JWT secret or
+an unconfigured database, producing an actionable configuration error instead of
+silently attempting `localhost:5432`.
