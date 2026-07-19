@@ -10,19 +10,15 @@ import (
 	"gorm.io/gorm/logger"
 )
 
-// Connect opens a connection pool to the PostgreSQL database using the given config.
+// Connect opens a connection pool to PostgreSQL using DATABASE_URL when present,
+// otherwise using the individual DB_* configuration values.
 func Connect(cfg *config.Config) (*gorm.DB, error) {
-	dsn := fmt.Sprintf(
-		"host=%s port=%s user=%s password=%s dbname=%s sslmode=%s",
-		cfg.DBHost, cfg.DBPort, cfg.DBUser, cfg.DBPassword, cfg.DBName, cfg.DBSSLMode,
-	)
-
 	logLevel := logger.Silent
 	if cfg.Environment == "development" {
 		logLevel = logger.Info
 	}
 
-	database, err := gorm.Open(postgres.Open(dsn), &gorm.Config{
+	database, err := gorm.Open(postgres.Open(connectionDSN(cfg)), &gorm.Config{
 		Logger: logger.Default.LogMode(logLevel),
 	})
 	if err != nil {
@@ -30,6 +26,17 @@ func Connect(cfg *config.Config) (*gorm.DB, error) {
 	}
 
 	return database, nil
+}
+
+func connectionDSN(cfg *config.Config) string {
+	if cfg.DatabaseURL != "" {
+		return cfg.DatabaseURL
+	}
+
+	return fmt.Sprintf(
+		"host=%s port=%s user=%s password=%s dbname=%s sslmode=%s",
+		cfg.DBHost, cfg.DBPort, cfg.DBUser, cfg.DBPassword, cfg.DBName, cfg.DBSSLMode,
+	)
 }
 
 // AutoMigrate runs GORM auto-migration for all registered models.
