@@ -1,0 +1,27 @@
+services:
+  - type: web
+    name: tenant-saas-backend
+    runtime: docker
+    plan: starter
+    region: singapore
+    healthCheckPath: /health
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: PORT
+        value: "10000"
+      - key: JWT_SECRET
+        generateValue: true
+      - key: JWT_EXPIRY_HOURS
+        value: "24"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: tenant-saas-postgres
+          property: connectionString
+
+databases:
+  - name: tenant-saas-postgres
+    plan: basic-256mb
+    region: singapore
+    databaseName: tenant_saas
+    user: tenant_saas
