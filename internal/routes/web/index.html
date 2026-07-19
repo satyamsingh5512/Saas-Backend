@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#100d19" />
+    <meta name="description" content="A secure command center for your tenant SaaS workspace." />
+    <title>Tenancy — Secure workspace control</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/assets/app.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#main-content">Skip to content</a>
+    <svg class="svg-sprite" aria-hidden="true">
+      <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6" /></symbol>
+      <symbol id="i-grid" viewBox="0 0 24 24"><rect x="4" y="4" width="6" height="6" rx="1"/><rect x="14" y="4" width="6" height="6" rx="1"/><rect x="4" y="14" width="6" height="6" rx="1"/><rect x="14" y="14" width="6" height="6" rx="1"/></symbol>
+      <symbol id="i-users" viewBox="0 0 24 24"><path d="M16 20v-1.5a4.5 4.5 0 0 0-4.5-4.5h-4A4.5 4.5 0 0 0 3 18.5V20M9.5 10.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7ZM17 4.5a3 3 0 0 1 0 5.9M21 20v-1.5a4.5 4.5 0 0 0-2.8-4.15" /></symbol>
+      <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 21s8-3.6 8-10V5l-8-3-8 3v6c0 6.4 8 10 8 10Z"/><path d="m8.7 11.8 2.1 2.1 4.5-4.6"/></symbol>
+      <symbol id="i-pulse" viewBox="0 0 24 24"><path d="M3 12h3l2-7 4 14 2-7h7" /></symbol>
+      <symbol id="i-settings" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.64 2.64-.06-.06a1.7 1.7 0 0 0-1.88-.34 1.7 1.7 0 0 0-1.03 1.56v.1h-3.73v-.1a1.7 1.7 0 0 0-1.03-1.56 1.7 1.7 0 0 0-1.88.34l-.06.06-2.64-2.64.06-.06A1.7 1.7 0 0 0 5.26 15 1.7 1.7 0 0 0 3.7 14H3.6v-3.73h.1A1.7 1.7 0 0 0 5.26 9.2a1.7 1.7 0 0 0-.34-1.88l-.06-.06 2.64-2.64.06.06a1.7 1.7 0 0 0 1.88.34 1.7 1.7 0 0 0 1.03-1.56v-.1h3.73v.1a1.7 1.7 0 0 0 1.03 1.56 1.7 1.7 0 0 0 1.88-.34l.06-.06 2.64 2.64-.06.06a1.7 1.7 0 0 0-.34 1.88 1.7 1.7 0 0 0 1.56 1.03h.1V14h-.1A1.7 1.7 0 0 0 19.4 15Z"/></symbol>
+      <symbol id="i-bell" viewBox="0 0 24 24"><path d="M18 9a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4" /></symbol>
+      <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6"/><path d="m20 20-4.2-4.2" /></symbol>
+      <symbol id="i-logout" viewBox="0 0 24 24"><path d="M10 4H5v16h5M14 8l4 4-4 4M18 12H9" /></symbol>
+      <symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M15 9V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h3"/></symbol>
+      <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 11a8 8 0 0 0-14.8-4M4 4v4h4M4 13a8 8 0 0 0 14.8 4M20 20v-4h-4" /></symbol>
+      <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" /></symbol>
+      <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6" /></symbol>
+      <symbol id="i-spark" viewBox="0 0 24 24"><path d="m12 2 1.9 6.1L20 10l-6.1 1.9L12 18l-1.9-6.1L4 10l6.1-1.9L12 2ZM19 16l.8 2.2L22 19l-2.2.8L19 22l-.8-2.2L16 19l2.2-.8L19 16Z" /></symbol>
+    </svg>
+
+    <div id="toast-region" class="toast-region" aria-live="polite" aria-atomic="true"></div>
+
+    <section id="auth-view" class="auth-view">
+      <div class="auth-aurora aurora-one"></div><div class="auth-aurora aurora-two"></div>
+      <div class="auth-grid">
+        <aside class="auth-aside">
+          <a class="brand" href="/" aria-label="Tenancy home"><span class="brand-mark"><i></i><i></i><i></i></span><span>tenancy</span></a>
+          <div class="auth-aside-copy">
+            <div class="eyebrow"><span class="live-dot"></span> SYSTEMS ONLINE</div>
+            <h1>Built for the work <em>behind</em> growth.</h1>
+            <p>One deliberate workspace for the organizations that are building what comes next.</p>
+          </div>
+          <div class="security-card">
+            <div class="security-icon"><svg><use href="#i-shield" /></svg></div>
+            <div><strong>Tenant-isolated by design</strong><p>Every request is scoped to your verified workspace.</p></div>
+          </div>
+          <div class="auth-footer"><span>© <span id="year"></span> Tenancy</span><span>Secure by default</span></div>
+        </aside>
+
+        <main class="auth-main" id="main-content">
+          <div class="auth-card">
+            <div class="auth-card-top"><span class="eyebrow">WORKSPACE ACCESS</span><span class="step-pill" id="form-step">01 / 02</span></div>
+            <div class="auth-head"><h2 id="auth-title">Welcome back.</h2><p id="auth-subtitle">Enter your credentials to continue to your workspace.</p></div>
+            <div class="auth-tabs" role="tablist" aria-label="Authentication options">
+              <button class="auth-tab active" type="button" role="tab" aria-selected="true" aria-controls="login-panel" id="login-tab" data-mode="login">Sign in</button>
+              <button class="auth-tab" type="button" role="tab" aria-selected="false" aria-controls="register-panel" id="register-tab" data-mode="register">Create workspace</button>
+            </div>
+
+            <div id="auth-message" class="form-message" role="alert" hidden></div>
+            <form id="login-form" class="auth-form" novalidate>
+              <div class="field"><label for="login-email">Work email</label><input id="login-email" name="email" type="email" autocomplete="email" placeholder="you@company.com" required /></div>
+              <div class="field"><div class="label-line"><label for="login-password">Password</label><span class="field-hint">Min. 8 characters</span></div><div class="password-wrap"><input id="login-password" name="password" type="password" autocomplete="current-password" placeholder="••••••••••" required /><button class="password-toggle" type="button" data-password-toggle="login-password" aria-label="Show password">Show</button></div></div>
+              <button class="primary-button" type="submit"><span>Enter workspace</span><svg><use href="#i-arrow" /></svg></button>
+            </form>
+
+            <form id="register-form" class="auth-form" novalidate hidden>
+              <div class="field-grid"><div class="field"><label for="tenant-name">Workspace name</label><input id="tenant-name" name="tenant_name" autocomplete="organization" placeholder="Acme Studio" required minlength="2" /></div><div class="field"><label for="tenant-slug">Workspace URL</label><div class="slug-wrap"><span>tenancy/</span><input id="tenant-slug" name="tenant_slug" autocomplete="off" placeholder="acme-studio" required minlength="2" /></div></div></div>
+              <div class="field"><label for="register-email">Admin email</label><input id="register-email" name="email" type="email" autocomplete="email" placeholder="you@company.com" required /></div>
+              <div class="field"><div class="label-line"><label for="register-password">Create a password</label><span class="field-hint">Min. 8 characters</span></div><div class="password-wrap"><input id="register-password" name="password" type="password" autocomplete="new-password" placeholder="Use 8 or more characters" required minlength="8" /><button class="password-toggle" type="button" data-password-toggle="register-password" aria-label="Show password">Show</button></div></div>
+              <button class="primary-button" type="submit"><span>Create secure workspace</span><svg><use href="#i-arrow" /></svg></button>
+              <p class="terms">By creating a workspace, you agree to use this service responsibly.</p>
+            </form>
+            <p class="auth-note"><svg><use href="#i-shield" /></svg><span>Protected with signed, tenant-scoped access.</span></p>
+          </div>
+        </main>
+      </div>
+    </section>
+
+    <section id="app-view" class="app-view" hidden>
+      <aside class="sidebar">
+        <div class="sidebar-top"><a class="brand" href="/" aria-label="Tenancy dashboard"><span class="brand-mark"><i></i><i></i><i></i></span><span>tenancy</span></a><button class="icon-button mobile-close" type="button" id="close-sidebar" aria-label="Close navigation">×</button></div>
+        <div class="workspace-switcher"><span class="workspace-glyph" id="workspace-initial">T</span><div><strong id="workspace-name">Your workspace</strong><span>Organization</span></div><svg><use href="#i-chevron" /></svg></div>
+        <nav class="primary-nav" aria-label="Primary navigation">
+          <a class="nav-item active" href="#overview" data-section="overview"><svg><use href="#i-grid" /></svg><span>Overview</span></a>
+          <a class="nav-item" href="#people" data-section="people"><svg><use href="#i-users" /></svg><span>People</span><span class="nav-count" id="nav-user-count">0</span></a>
+          <a class="nav-item" href="#security" data-section="security"><svg><use href="#i-shield" /></svg><span>Security</span></a>
+          <a class="nav-item" href="#activity" data-section="activity"><svg><use href="#i-pulse" /></svg><span>Activity</span><span class="new-tag">NEW</span></a>
+        </nav>
+        <div class="sidebar-bottom"><div class="sidebar-separator"></div><a class="nav-item" href="#settings" data-section="settings"><svg><use href="#i-settings" /></svg><span>Workspace settings</span></a><div class="sidebar-profile"><span class="avatar avatar-purple" id="profile-avatar">Y</span><div><strong id="profile-email">Loading account</strong><span id="profile-role">Member</span></div><button class="icon-button" type="button" id="logout-button" aria-label="Sign out"><svg><use href="#i-logout" /></svg></button></div></div>
+      </aside>
+      <div class="sidebar-scrim" id="sidebar-scrim"></div>
+      <div class="app-shell">
+        <header class="topbar"><button class="icon-button menu-button" type="button" id="menu-button" aria-label="Open navigation"><span></span><span></span></button><div class="breadcrumb"><span>Workspace</span><svg><use href="#i-chevron" /></svg><strong id="breadcrumb-current">Overview</strong></div><div class="topbar-actions"><button class="command-search" type="button" id="focus-search"><svg><use href="#i-search" /></svg><span>Search people...</span><kbd>⌘ K</kbd></button><button class="icon-button notification-button" type="button" aria-label="Notifications"><svg><use href="#i-bell" /></svg><i></i></button><span class="avatar avatar-purple top-avatar" id="top-avatar">Y</span></div></header>
+        <main class="dashboard" id="dashboard-main">
+          <div class="page-head"><div><div class="eyebrow"><span class="live-dot"></span> LIVE WORKSPACE</div><h1>Good to see you, <span id="greeting-name">there</span>.</h1><p>Here’s the clearest view of your organization right now.</p></div><button class="outline-button" type="button" id="refresh-button"><svg><use href="#i-refresh" /></svg><span>Refresh data</span></button></div>
+          <section class="metrics-grid" aria-label="Workspace metrics">
+            <article class="metric-card"><div class="metric-top"><span class="metric-icon purple"><svg><use href="#i-users" /></svg></span><span class="metric-label">TEAM MEMBERS</span></div><strong id="member-count" class="metric-value">—</strong><div class="metric-bottom"><span class="positive-dot"></span><span id="member-summary">Loading directory</span></div></article>
+            <article class="metric-card"><div class="metric-top"><span class="metric-icon lilac"><svg><use href="#i-shield" /></svg></span><span class="metric-label">ACCESS LEVEL</span></div><strong id="role-value" class="metric-value capitalize">—</strong><div class="metric-bottom"><span class="positive-dot"></span><span>Identity verified</span></div></article>
+            <article class="metric-card tenant-card"><div class="metric-top"><span class="metric-icon rose"><svg><use href="#i-spark" /></svg></span><span class="metric-label">WORKSPACE ID</span><button class="copy-button" id="copy-tenant-id" type="button" aria-label="Copy workspace ID"><svg><use href="#i-copy" /></svg></button></div><strong id="tenant-id-value" class="metric-id">—</strong><div class="metric-bottom"><span>Tenant-scoped session</span></div></article>
+          </section>
+          <section class="dashboard-grid">
+            <article class="panel people-panel" id="people"><div class="panel-head"><div><div class="section-kicker">DIRECTORY</div><h2>People in your workspace</h2></div><button class="text-button" type="button" id="show-all-users">View all <svg><use href="#i-arrow" /></svg></button></div><div class="directory-tools"><label class="directory-search"><svg><use href="#i-search" /></svg><span class="sr-only">Find a person</span><input id="user-search" type="search" placeholder="Find a person" autocomplete="off" /></label><button class="filter-button" type="button" id="admin-filter">Admins</button></div><div id="users-list" class="users-list" aria-live="polite"><div class="loading-line"><i></i><i></i><i></i></div></div><div class="panel-footer"><span id="directory-footnote">Your directory is isolated to this tenant.</span><button class="invite-button" type="button" id="invite-button"><svg><use href="#i-plus" /></svg>Invite people</button></div></article>
+            <aside class="right-rail"><article class="panel posture-panel" id="security"><div class="panel-head"><div><div class="section-kicker">SECURITY</div><h2>Access posture</h2></div><span class="score-ring"><b>100</b></span></div><div class="posture-status"><span class="status-orb"></span><div><strong>All systems protected</strong><p>Your API session is valid and tenant-scoped.</p></div></div><div class="posture-list"><div><span><svg><use href="#i-shield" /></svg>Signed JWT session</span><b>Active</b></div><div><span><svg><use href="#i-users" /></svg>Tenant boundary</span><b>Enforced</b></div><div><span><svg><use href="#i-pulse" /></svg>Workspace health</span><b id="health-status">Checking</b></div></div></article><article class="panel activity-panel" id="activity"><div class="panel-head"><div><div class="section-kicker">RECENT</div><h2>System activity</h2></div><span class="activity-live"><i></i>LIVE</span></div><div class="activity-item"><span class="activity-icon"><svg><use href="#i-shield" /></svg></span><div><strong>Secure session established</strong><p id="activity-time">Just now</p></div></div><div class="activity-item"><span class="activity-icon"><svg><use href="#i-users" /></svg></span><div><strong>Directory synchronized</strong><p id="sync-time">Awaiting sync</p></div></div></article></aside>
+          </section>
+          <section id="overview" class="insight-banner"><div class="insight-mark"><svg><use href="#i-spark" /></svg></div><div><span class="section-kicker">WORKSPACE INTELLIGENCE</span><h2>Everything important, without the noise.</h2><p>Tenant context is derived from your signed identity—not from browser input.</p></div><span class="insight-arc"></span></section>
+        </main>
+      </div>
+    </section>
+
+    <dialog id="invite-modal" class="modal"><button class="modal-close" type="button" data-close-modal aria-label="Close">×</button><span class="modal-icon"><svg><use href="#i-users" /></svg></span><div class="section-kicker">PEOPLE MANAGEMENT</div><h2>Invitations are ready for your API.</h2><p>This dashboard only exposes actions supported by the current backend. Add a tenant-scoped invitation endpoint to enable secure member provisioning here.</p><button class="primary-button modal-action" type="button" data-close-modal><span>Got it</span><svg><use href="#i-arrow" /></svg></button></dialog>
+    <script src="/assets/app.js" defer></script>
+  </body>
+</html>
