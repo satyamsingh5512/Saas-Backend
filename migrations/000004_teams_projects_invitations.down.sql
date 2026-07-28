@@ -1,0 +1,6 @@
+DROP TABLE IF EXISTS api_keys;
+DROP TABLE IF EXISTS invitations;
+DROP TABLE IF EXISTS project_members;
+DROP TABLE IF EXISTS projects;
+DROP TABLE IF EXISTS team_members;
+DROP TABLE IF EXISTS teams;
