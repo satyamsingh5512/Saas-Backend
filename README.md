@@ -320,6 +320,14 @@ enforcement, and audit capture.
 When changing the dashboard JavaScript, run `node --check
 internal/routes/web/assets/app.js`; it is not covered by `go vet`.
 
+The stylesheet *is* covered. `TestInkRampMeetsWCAGAA` parses `app.css`, resolves
+each ink token through the neutral ramp for both schemes, and computes the real
+WCAG 2.1 contrast ratio against the backgrounds the token is painted on, failing
+below 4.5:1. `TestDarkSchemeBlocksAgreeOnRamp` asserts the two dark blocks — the
+`prefers-color-scheme` one and the `:root.theme-dark` override — never drift
+apart, since the file has to declare that ramp twice. Both read from the embedded
+filesystem the server serves from, so neither can pass against a stale copy.
+
 ## 11) Security Notes
 
 - Set a strong `JWT_SECRET` (32+ characters). The server refuses to start in
@@ -361,6 +369,24 @@ Implementation constraints worth knowing before editing it:
   uses utility classes. Programmatic `element.style.width` (the quota bars) is
   fine, as CSSOM writes are not CSP-restricted.
 - Fonts are system stacks. No third-party origin is contacted at runtime.
+- Motion is CSS keyframes and transitions only, on `transform` and `opacity`.
+  A JS animation library is not an option here rather than a preference: they
+  animate by writing inline styles, which `style-src 'self'` blocks, so adopting
+  one would mean weakening a real security control. Entrances are pure CSS — a
+  freshly built element plays its animation on first render, and every render in
+  `app.js` builds new nodes. Three exits need JS, because a `<dialog>` leaves the
+  top layer the frame `close()` runs, a toast leaves the DOM, and the drawer
+  scrim is toggled with `[hidden]`: `app.js` adds `.is-closing`, waits, then
+  performs the removal, so the `EXIT` table there and the duration tokens in
+  `app.css` describe the same intervals and must change together. Everything is
+  neutralised by the `prefers-reduced-motion` block, which needs an explicit
+  `*::backdrop` rule — the universal selector does not reach a pseudo-element,
+  and the backdrop is the one animation that covers the whole viewport.
+- Colour is never the only signal, and the ink ramp is contrast-tested in CI
+  (see section 10). A `forced-colors` block at the end of `app.css` handles
+  Windows High Contrast Mode, where the browser drops `box-shadow` — which would
+  otherwise erase the focus ring on `.btn` and `.icon-btn`, since both set
+  `outline: none` and draw their ring as a shadow.
 - Access tokens live in `sessionStorage` and clear with the tab. For a
   persistent cross-device session, add HttpOnly cookie auth at the API layer.
 - The UI hides controls the caller lacks permission for, purely to avoid dead

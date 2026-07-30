@@ -102,6 +102,66 @@
 
   const clear = (n) => { while (n.firstChild) n.removeChild(n.firstChild); return n; };
 
+  /* ─────────────────────────────── Motion ─────────────────────────────── */
+
+  /* Entrances are entirely in app.css and need nothing here: a fresh element
+     carrying a keyframe animation plays it the first time it is rendered, which
+     is the moment it appears. Since every render in this file builds new nodes
+     rather than mutating old ones, "first render" and "appears" are the same
+     event, and the stylesheet gets that for free.
+
+     Exits cannot work that way, for three different reasons that happen to need
+     the same fix: a <dialog> leaves the top layer in the same frame close() is
+     called, a toast is removed from the DOM, and the drawer scrim is switched
+     off with [hidden]. In each case the element the animation would run on is
+     already gone. So the class goes on here, and the removal is deferred until
+     the animation has had time to play.
+
+     The wait is a timeout and not an `animationend` listener, deliberately. A
+     listener is more precise and has one failure mode too many: if the event
+     never arrives — the animation is cancelled, the tab is backgrounded, the
+     rule is edited away — the dialog stays open forever, which is a functional
+     break, not a cosmetic one. A timeout always fires. The cost of that choice
+     is that these numbers duplicate durations in app.css and have to be changed
+     with them; the token each one mirrors is named below. */
+  const EXIT = {
+    overlay: 150, // --t      · .modal, .sheet, .palette and their ::backdrop
+    toast: 100,   // --t-fast · .toast
+    scrim: 250,   // --t-slow · .scrim — matched to the drawer so both leave together
+  };
+
+  /* Read here as well as in the stylesheet, and not redundantly: the stylesheet
+     can shorten an animation to nothing, but only this can skip the *wait in
+     front of the close*. Without it a reduced-motion reader would sit through
+     150ms of nothing before every dialog dismissal — the delay would survive
+     exactly the preference meant to remove it. */
+  const reducedMotion = () => window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  const exitTimers = new WeakMap();
+
+  /** Plays `node`'s exit animation, then runs `done`. Idempotent per node. */
+  function playExit(node, ms, done) {
+    if (!node) return;
+    if (reducedMotion()) { done(); return; }
+    clearTimeout(exitTimers.get(node));
+    node.classList.add("is-closing");
+    exitTimers.set(node, setTimeout(() => {
+      exitTimers.delete(node);
+      node.classList.remove("is-closing");
+      done();
+    }, ms));
+  }
+
+  /** Aborts a pending exit, so reopening a still-departing overlay is clean. */
+  function cancelExit(node) {
+    if (!node) return;
+    clearTimeout(exitTimers.get(node));
+    exitTimers.delete(node);
+    node.classList.remove("is-closing");
+  }
+
+  const dismiss = (dlg) => { if (dlg && dlg.open) playExit(dlg, EXIT.overlay, () => dlg.close()); };
+
   /* ─────────────────────────────── Format ─────────────────────────────── */
 
   const fmt = {
@@ -154,7 +214,10 @@
       icon(glyph, "icon icon--sm toast__icon"),
       el("p", { class: "toast__text", text: msg }));
     $("#toasts").append(node);
-    setTimeout(() => node.remove(), kind === "err" ? 7000 : 4500);
+    // Errors linger: they carry something the reader may still need to act on.
+    // Either way the toast now animates out before it leaves the DOM, so the
+    // dismissal is visible as a departure rather than as a node disappearing.
+    setTimeout(() => playExit(node, EXIT.toast, () => node.remove()), kind === "err" ? 7000 : 4500);
   }
 
   /* ─────────────────────────────── API ────────────────────────────────── */
@@ -244,9 +307,13 @@
 
   const modal = $("#modal");
 
-  function closeModal() { if (modal.open) modal.close(); }
+  function closeModal() { dismiss(modal); }
 
   function openModal({ title, desc, body, footer, wide = false }) {
+    // A modal can be reopened while a previous dismissal is still animating —
+    // most often by the palette, which runs a create action as it leaves. Without
+    // this the pending timeout would close the modal that just opened.
+    cancelExit(modal);
     modal.classList.toggle("modal--wide", wide);
     clear(modal).append(
       el("div", { class: "modal__head" },
@@ -257,8 +324,45 @@
       body,
       footer);
     if (!modal.open) modal.showModal();
-    const focusable = modal.querySelector("input, select, textarea, .btn--primary, .btn--danger");
+    /* No `.btn--danger` here, deliberately. querySelector resolves in document
+       order, and confirmModal passes no body, so a danger button was always the
+       first match — "Delete project?" opened with Delete already focused, one
+       stray Enter from destroying something. With it removed, confirmModal has
+       no match at all and the dialog's own focusing steps take over, which land
+       on the first focusable descendant: the header close button. */
+    const focusable = modal.querySelector("input, select, textarea, .btn--primary");
     if (focusable) focusable.focus();
+  }
+
+  /* Mobile drawer. Module scope rather than local to wireShell() because route()
+     also has to close it — navigating from inside the drawer is the most common
+     way it gets dismissed, and that path used to hide the scrim in one frame
+     while the panel it was dimming slid out over 250ms. */
+  function openNav() {
+    const scrim = $(".scrim");
+    cancelExit(scrim);
+    document.body.classList.add("nav-open");
+    $$('[data-nav="open"]').forEach((b) => b.setAttribute("aria-expanded", "true"));
+    // Order matters: the fade-in is a keyframe animation, which only plays as the
+    // element goes from [hidden] to rendered, so unhiding has to be the last step.
+    scrim.hidden = false;
+  }
+
+  function closeNav() {
+    const scrim = $(".scrim");
+    document.body.classList.remove("nav-open");
+    // route() calls this on every navigation, including the desktop case where
+    // the drawer was never open. Animating an already-hidden element would be a
+    // no-op that still delays `hidden = true` by 250ms, so bail out instead.
+    if (scrim.hidden) { cancelExit(scrim); return; }
+    $$('[data-nav="open"]').forEach((b) => b.setAttribute("aria-expanded", "false"));
+    // The drawer is about to become visibility: hidden. If focus is still inside
+    // it — Escape pressed while tabbing the nav — it would be orphaned on <body>,
+    // so it goes back to the control that opened the drawer. Only in that case:
+    // a click on the scrim leaves focus where it already was.
+    const opener = $('.topbar__menu[data-nav="open"]');
+    if (opener && $("#sidebar").contains(document.activeElement)) opener.focus();
+    playExit(scrim, EXIT.scrim, () => { scrim.hidden = true; });
   }
 
   /**
@@ -272,6 +376,10 @@
 
     for (const f of fields) {
       const id = `f-${f.name}`;
+      const labelId = `${id}-label`;
+      // A picker is a set of checkboxes, not a labelable control, so `for` had
+      // nothing to point at. It gets a group role and is named by reference.
+      const isPicker = f.type === "picker";
       let control;
 
       if (f.type === "select") {
@@ -285,8 +393,8 @@
       } else if (f.type === "checkbox") {
         control = el("input", { type: "checkbox", id });
         control.checked = Boolean(f.value);
-      } else if (f.type === "picker") {
-        control = el("div", { class: "picker" });
+      } else if (isPicker) {
+        control = el("div", { class: "picker", id, role: "group", "aria-labelledby": labelId });
         for (const o of f.options) {
           const box = el("input", { type: "checkbox", value: o.code, id: `p-${o.code}` });
           box.checked = (f.value || []).includes(o.code);
@@ -310,7 +418,9 @@
       } else {
         body.append(el("div", { class: "field" },
           el("div", { class: "field__row" },
-            el("label", { class: "field__label", for: id, text: f.label }),
+            isPicker
+              ? el("span", { class: "field__label", id: labelId, text: f.label })
+              : el("label", { class: "field__label", for: id, text: f.label }),
             f.optional ? el("span", { class: "field__optional", text: "optional" }) : null),
           control,
           f.hint ? el("p", { class: "field__hint", text: f.hint }) : null));
@@ -415,12 +525,20 @@
     return card;
   }
 
-  function table(cols, rows) {
+  /* `label` names the scroll container, not the table. .table-wrap is
+     overflow-x: auto, and a scroll container with no focusable child cannot be
+     reached by keyboard at all — on a narrow viewport the last columns are
+     simply unreachable. tabindex makes it scrollable with the arrow keys, and a
+     focus stop that announces only "group" is its own problem, hence the name. */
+  function table(cols, rows, label) {
     const head = el("tr", {});
     for (const c of cols) {
-      head.append(el("th", { class: c.actions ? "actions" : c.num ? "num" : null, scope: "col" }, c.actions ? "" : c.label));
+      head.append(el("th", { class: c.actions ? "actions" : c.num ? "num" : null, scope: "col" },
+        // The actions column is deliberately blank on screen; left empty it is
+        // announced as "blank" once per row.
+        c.actions ? el("span", { class: "sr-only", text: "Actions" }) : c.label));
     }
-    return el("div", { class: "table-wrap" },
+    return el("div", { class: "table-wrap", tabindex: 0, role: "group", "aria-label": label || null },
       el("table", { class: "table" }, el("thead", {}, head), el("tbody", {}, rows)));
   }
 
@@ -458,8 +576,8 @@
     return el("div", { class: "pager" },
       el("span", { text: `${from}–${to} of ${meta.total}` }),
       el("div", { class: "pager__btns" },
-        el("button", { class: "btn btn--secondary btn--sm", type: "button", disabled: meta.page <= 1, onclick: () => onPage(meta.page - 1) }, "Previous"),
-        el("button", { class: "btn btn--secondary btn--sm", type: "button", disabled: meta.page >= meta.total_pages, onclick: () => onPage(meta.page + 1) }, "Next")));
+        el("button", { class: "btn btn--secondary btn--sm", type: "button", disabled: meta.page <= 1, dataset: { focusKey: "pager-prev" }, onclick: () => onPage(meta.page - 1) }, "Previous"),
+        el("button", { class: "btn btn--secondary btn--sm", type: "button", disabled: meta.page >= meta.total_pages, dataset: { focusKey: "pager-next" }, onclick: () => onPage(meta.page + 1) }, "Next")));
   }
 
   function pageHead(title, desc, ...actions) {
@@ -468,11 +586,21 @@
       actions.filter(Boolean).length ? el("div", { class: "page__actions" }, actions.filter(Boolean)) : null);
   }
 
-  const rowBtn = (glyph, label, onclick, danger = false) =>
-    el("button", { class: `icon-btn${danger ? " icon-btn--danger" : ""}`, type: "button", title: label, "aria-label": label, onclick }, icon(glyph));
+  /* `key` defaults to the label, which is enough for every action whose label is
+     stable across a re-render. The archive/restore toggle is the one that is
+     not — it renames itself as it succeeds — so it passes a fixed key and keeps
+     focus on the button the reader just pressed. */
+  const rowBtn = (glyph, label, onclick, danger = false, key = label) =>
+    el("button", {
+      class: `icon-btn${danger ? " icon-btn--danger" : ""}`, type: "button",
+      title: label, "aria-label": label, dataset: { focusKey: key }, onclick,
+    }, icon(glyph));
 
   function searchBox(value, placeholder, onChange) {
-    const input = el("input", { class: "input", type: "search", value, placeholder, "aria-label": placeholder });
+    const input = el("input", {
+      class: "input", type: "search", value, placeholder, "aria-label": placeholder,
+      dataset: { focusKey: "search" },
+    });
     let t;
     input.addEventListener("input", () => {
       clearTimeout(t);
@@ -481,11 +609,12 @@
     return el("div", { class: "search" }, icon("search"), input);
   }
 
-  function segment(options, active, onPick) {
-    const wrap = el("div", { class: "segment", role: "group" });
+  function segment(options, active, onPick, label) {
+    const wrap = el("div", { class: "segment", role: "group", "aria-label": label || null });
     for (const o of options) {
       wrap.append(el("button", {
         class: "segment__btn", type: "button", "aria-pressed": String(o.value === active),
+        dataset: { focusKey: `segment-${o.value || "all"}` },
         onclick: () => onPick(o.value),
       }, o.label));
     }
@@ -508,7 +637,60 @@
   const host = () => $("#page");
   const render = (node) => clear(host()).append(node);
 
+  /* ── Focus survival ──
+     Every list control in this file re-renders the whole page: a filter, a page
+     button, and a row action all end in `pages.X()`, which clears #page and
+     builds it again. The node holding focus is therefore destroyed, and focus
+     falls to <body>. For the search box that is not an inconvenience but a
+     functional break — the 280ms debounce fires mid-typing, so the second word
+     of a query cannot be typed without tabbing back.
+
+     A control opts in with `dataset: { focusKey }`. The key does not have to be
+     unique: row actions legitimately repeat ("Edit" on every row), so the
+     ordinal among same-key nodes is recorded too and the same position is
+     restored. That is what puts focus back on row 3's Edit button rather than
+     row 1's. Caret position is carried as well, since restoring focus to a text
+     field while dropping the cursor to the end is its own small bug. */
+  function captureFocus() {
+    const node = document.activeElement;
+    if (!node || !node.dataset) return null;
+    const key = node.dataset.focusKey;
+    if (!key || !host().contains(node)) return null;
+
+    const peers = host().querySelectorAll(`[data-focus-key="${CSS.escape(key)}"]`);
+    const snap = { key, nth: Array.prototype.indexOf.call(peers, node) };
+    if (typeof node.selectionStart === "number") {
+      snap.start = node.selectionStart;
+      snap.end = node.selectionEnd;
+    }
+    return snap;
+  }
+
+  function restoreFocus(snap) {
+    if (!snap) return;
+    const peers = host().querySelectorAll(`[data-focus-key="${CSS.escape(snap.key)}"]`);
+    let node = peers[snap.nth] || peers[0];
+    // Paging to the last page disables Next, and focusing a disabled button is
+    // silently ignored — which would drop focus on <body> exactly where the
+    // reader was working. Hand it to the sibling that is still operable.
+    if (node && node.disabled) {
+      node = node.parentElement ? node.parentElement.querySelector("[data-focus-key]:not([disabled])") : null;
+    }
+    if (!node) return;
+    node.focus();
+    if (snap.start !== undefined && typeof node.setSelectionRange === "function") {
+      try { node.setSelectionRange(snap.start, snap.end); } catch (_) { /* type does not support a caret */ }
+    }
+  }
+
   async function view(skeleton, load, build) {
+    const snap = captureFocus();
+    const page = host();
+    // The skeleton spans carry no text, so without this the region reads as
+    // empty and then silently fills. aria-busy is the whole of the fix: the
+    // route announcer already names the view, and a second live region firing
+    // per load would talk over it.
+    page.setAttribute("aria-busy", "true");
     render(el("div", { class: "page" }, skeleton));
     try {
       const data = await load();
@@ -517,6 +699,11 @@
       render(el("div", { class: "page" }, el("div", { class: "card" },
         emptyState("alert", "Could not load this view", err.message,
           el("button", { class: "btn btn--secondary", type: "button", onclick: () => route() }, icon("refresh"), "Try again")))));
+    } finally {
+      page.removeAttribute("aria-busy");
+      // Also runs on the error path, where nothing carries a focus key and this
+      // is a no-op — cheaper than duplicating the call in both branches.
+      restoreFocus(snap);
     }
   }
 
@@ -627,7 +814,7 @@
           searchBox(q.projects.search, "Search projects…", (v) => { q.projects.search = v; q.projects.page = 1; pages.projects(); }),
           segment([
             { value: "", label: "All" }, { value: "active", label: "Active" }, { value: "archived", label: "Archived" },
-          ], q.projects.status, (v) => { q.projects.status = v; q.projects.page = 1; pages.projects(); })));
+          ], q.projects.status, (v) => { q.projects.status = v; q.projects.page = 1; pages.projects(); }, "Filter projects by status")));
 
       if (!projects.items.length) {
         card.append(emptyState("folder", q.projects.search || q.projects.status ? "No matching projects" : "No projects yet",
@@ -647,7 +834,7 @@
                 toast(archiving ? "Project archived" : "Project restored", "ok");
                 pages.projects();
               } catch (e) { toast(e.message, "err"); }
-            }));
+            }, false, "archive-toggle"));
           }
           if (can("project:delete")) {
             actions.append(rowBtn("trash", "Delete", () => confirmModal({
@@ -674,7 +861,7 @@
         card.append(table([
           { label: "Project" }, { label: "Status" }, { label: "Team" },
           { label: "Members", num: true }, { label: "Created" }, { actions: true },
-        ], rows));
+        ], rows, "Projects"));
         const p = pager(projects.page, (n) => { q.projects.page = n; pages.projects(); });
         if (p) card.append(p);
       }
@@ -767,7 +954,7 @@
 
         card.append(table([
           { label: "Team" }, { label: "Description" }, { label: "Members", num: true }, { label: "Created" }, { actions: true },
-        ], rows));
+        ], rows, "Teams"));
         const p = pager(teams.page, (n) => { q.teams.page = n; pages.teams(); });
         if (p) card.append(p);
       }
@@ -851,7 +1038,11 @@
       if (!available.length) {
         body.append(el("p", { class: "field__hint", text: "Everyone in the organization is already a member." }));
       } else {
-        const select = el("select", { class: "select", "aria-label": "Choose someone to add" });
+        // The visible text is now the accessible name. It was an orphan <label>
+        // beside a select named "Choose someone to add", so a speech-input user
+        // saying "Add a member" addressed a control that answered to something
+        // else (2.5.3 Label in Name).
+        const select = el("select", { class: "select", id: "member-add" });
         for (const p of available) select.append(el("option", { value: p.id }, `${p.full_name || p.email} · ${p.email}`));
 
         const add = el("button", { class: "btn btn--primary btn--block", type: "button" }, icon("plus"), `Add to ${kind}`);
@@ -869,7 +1060,7 @@
         });
 
         body.append(el("hr", { class: "divider" }),
-          el("div", { class: "field" }, el("label", { class: "field__label", text: "Add a member" }), select), add);
+          el("div", { class: "field" }, el("label", { class: "field__label", for: "member-add", text: "Add a member" }), select), add);
       }
     }
 
@@ -914,7 +1105,7 @@
 
       dir.append(table([
         { label: "Person" }, { label: "Status" }, { label: "Email" }, { label: "Joined" }, { actions: true },
-      ], rows));
+      ], rows, "Member directory"));
       const pg = pager(users.page, (n) => { q.members.page = n; pages.members(); });
       if (pg) dir.append(pg);
 
@@ -949,7 +1140,7 @@
               el("td", {}, el("span", { class: "cell--muted", text: `Expires ${fmt.date(i.expires_at)}` })),
               el("td", { class: "actions" }, actions));
           });
-          inv.append(table([{ label: "Email" }, { label: "Role" }, { label: "Expiry" }, { actions: true }], irows));
+          inv.append(table([{ label: "Email" }, { label: "Role" }, { label: "Expiry" }, { actions: true }], irows, "Pending invitations"));
         }
         stack.append(inv);
       }
@@ -1031,7 +1222,7 @@
 
       const card = el("section", { class: "card" }, table([
         { label: "Role" }, { label: "Description" }, { label: "Type" }, { label: "Rank", num: true }, { actions: true },
-      ], rows));
+      ], rows, "Roles"));
 
       const cat = el("section", { class: "card" },
         el("div", { class: "card__head" }, el("div", {},
@@ -1132,7 +1323,7 @@
 
         card.append(table([
           { label: "Key" }, { label: "Scopes" }, { label: "State" }, { label: "Last used" }, { label: "Expires" }, { actions: true },
-        ], rows));
+        ], rows, "API keys"));
       }
 
       page.append(card);
@@ -1298,7 +1489,7 @@
             el("td", {}, el("span", { class: "cell--mono", text: e.ip_address || "—" })),
             el("td", {}, el("span", { class: "cell--muted", text: fmt.dateTime(e.created_at) })));
         });
-        card.append(table([{ label: "Action" }, { label: "Target" }, { label: "Source IP" }, { label: "When" }], rows));
+        card.append(table([{ label: "Action" }, { label: "Target" }, { label: "Source IP" }, { label: "When" }], rows, "Audit log entries"));
         const pg = pager(logs.page, (n) => { q.audit.page = n; pages.audit(); });
         if (pg) card.append(pg);
       }
@@ -1348,14 +1539,16 @@
       });
       profileForm.append(
         el("div", { class: "form-row" },
-          el("div", {}, el("p", { class: "form-row__label", text: "Full name" }), el("p", { class: "form-row__hint", text: "Shown to teammates across the workspace" })),
+          el("div", {}, el("label", { class: "form-row__label", for: "s-name", text: "Full name" }), el("p", { class: "form-row__hint", text: "Shown to teammates across the workspace" })),
           el("div", {}, name)),
         el("div", { class: "form-row" },
-          el("div", {}, el("p", { class: "form-row__label", text: "Avatar URL" }), el("p", { class: "form-row__hint", text: "Must be an absolute https URL" })),
+          el("div", {}, el("label", { class: "form-row__label", for: "s-avatar", text: "Avatar URL" }), el("p", { class: "form-row__hint", text: "Must be an absolute https URL" })),
           el("div", {}, avatar)),
         el("div", { class: "form-row" },
-          el("div", {}, el("p", { class: "form-row__label", text: "Email" }), el("p", { class: "form-row__hint", text: "Contact an administrator to change this" })),
-          el("div", {}, el("input", { class: "input", type: "email", value: profile.email, disabled: true }))),
+          // Disabled, but still labelled: a reader navigating the form is told
+          // what the field is before being told it cannot be edited.
+          el("div", {}, el("label", { class: "form-row__label", for: "s-email", text: "Email" }), el("p", { class: "form-row__hint", text: "Contact an administrator to change this" })),
+          el("div", {}, el("input", { class: "input", id: "s-email", type: "email", value: profile.email, disabled: true }))),
         el("div", { class: "form-actions" }, saveProfile));
 
       /* Preferences */
@@ -1388,15 +1581,17 @@
       });
       prefsForm.append(
         el("div", { class: "form-row" },
-          el("div", {}, el("p", { class: "form-row__label", text: "Theme" }), el("p", { class: "form-row__hint", text: "System follows your operating system" })),
+          el("div", {}, el("label", { class: "form-row__label", for: "s-theme", text: "Theme" }), el("p", { class: "form-row__hint", text: "System follows your operating system" })),
           el("div", {}, themeSel)),
         el("div", { class: "form-row" },
-          el("div", {}, el("p", { class: "form-row__label", text: "Timezone" })),
+          el("div", {}, el("label", { class: "form-row__label", for: "s-tz", text: "Timezone" })),
           el("div", {}, tz)),
         el("div", { class: "form-row" },
-          el("div", {}, el("p", { class: "form-row__label", text: "Locale" })),
+          el("div", {}, el("label", { class: "form-row__label", for: "s-locale", text: "Locale" })),
           el("div", {}, locale)),
         el("div", { class: "form-row" },
+          // Stays a <p>: the checkbox already has its own label ("Enabled"), and
+          // a second `for` pointing at it would concatenate into the name.
           el("div", {}, el("p", { class: "form-row__label", text: "Email notifications" }), el("p", { class: "form-row__hint", text: "Receive email for important workspace events" })),
           el("div", {}, el("div", { class: "check" }, mails, el("label", { class: "check__label", for: "s-mails", text: "Enabled" })))),
         el("div", { class: "form-actions" }, savePrefs));
@@ -1418,10 +1613,10 @@
       });
       pwForm.append(
         el("div", { class: "form-row" },
-          el("div", {}, el("p", { class: "form-row__label", text: "Current password" })),
+          el("div", {}, el("label", { class: "form-row__label", for: "s-cur", text: "Current password" })),
           el("div", {}, cur)),
         el("div", { class: "form-row" },
-          el("div", {}, el("p", { class: "form-row__label", text: "New password" }), el("p", { class: "form-row__hint", text: "At least 8 characters" })),
+          el("div", {}, el("label", { class: "form-row__label", for: "s-new", text: "New password" }), el("p", { class: "form-row__hint", text: "At least 8 characters" })),
           el("div", {}, nw)),
         el("div", { class: "form-actions" }, savePw));
 
@@ -1442,13 +1637,24 @@
   async function badgeCount() {
     try {
       const d = await call("/notifications/unread-count");
+      const unread = d ? d.unread : 0;
       $("#bell-dot").hidden = !d || d.unread === 0;
+      // The dot is the only unread signal, so on its own the state is carried by
+      // colour alone (1.4.1) and is invisible to a reader. The count goes into
+      // the button's name instead of a second live region, which would announce
+      // on every poll.
+      $("#bell").setAttribute("aria-label", unread ? `Notifications, ${unread} unread` : "Notifications");
     } catch (_) { /* non-critical */ }
   }
 
   async function openNotifications() {
     const sheet = $("#notifications");
+    // "Mark all read" re-enters this function with the panel already open, and it
+    // may be mid-dismissal; without this the pending timeout would slide the
+    // freshly reloaded panel straight back out.
+    cancelExit(sheet);
     const body = clear($("#notification-body"));
+    body.setAttribute("aria-busy", "true");
     body.append(el("div", { class: "stack" },
       el("span", { class: "skel skel--text skel--w80" }), el("span", { class: "skel skel--text skel--w60" })));
     if (!sheet.open) sheet.showModal();
@@ -1468,6 +1674,10 @@
       }
     } catch (err) {
       clear(body).append(emptyState("alert", "Could not load notifications", err.message));
+    } finally {
+      // In a finally, not after the loop: the empty case returns early and the
+      // failure case throws past it, and both must clear the busy state.
+      body.removeAttribute("aria-busy");
     }
   }
 
@@ -1514,40 +1724,65 @@
     paletteIndex = 0;
 
     if (!matches.length) {
-      listEl.append(el("p", { class: "palette__empty", text: "No results" }));
+      // role="status" on a node that was already in the DOM: unhiding it is the
+      // change the live region reports, so "No results" is actually spoken.
+      $("#palette-empty").hidden = false;
+      $("#palette-query").removeAttribute("aria-activedescendant");
       return;
     }
+    $("#palette-empty").hidden = true;
 
     let group = null;
     matches.forEach((c, i) => {
       if (c.group !== group) {
         group = c.group;
-        listEl.append(el("p", { class: "palette__group", text: group }));
+        // A listbox may only own options. role="presentation" keeps the heading
+        // out of the set, so "3 of 15" stays true.
+        listEl.append(el("p", { class: "palette__group", role: "presentation", text: group }));
       }
       const item = el("button", {
-        class: "palette__item", type: "button", role: "option",
+        // The id is what aria-activedescendant points at. It is unique within a
+        // render because `i` is the match index, and the previous render's nodes
+        // are removed before these are appended.
+        class: "palette__item", type: "button", role: "option", id: `palette-opt-${i}`,
+        // Focus belongs to the input for as long as the palette is open, so the
+        // arrow-key handler bound there keeps receiving keys. Without this the
+        // options are tab stops and Tab walks focus to where the arrows are dead.
+        tabindex: -1,
         "aria-selected": String(i === 0), dataset: { index: String(i) },
         onclick: () => runPalette(c),
       }, icon(c.glyph), el("span", { text: c.label }), c.route ? el("span", { class: "palette__hint", text: `#/${c.route}` }) : null);
       listEl.append(item);
     });
+
+    highlightPalette();
   }
 
   function highlightPalette() {
+    let active = null;
     $$("#palette-list .palette__item").forEach((n, i) => {
       const on = i === paletteIndex;
       n.setAttribute("aria-selected", String(on));
-      if (on) n.scrollIntoView({ block: "nearest" });
+      if (on) { active = n; n.scrollIntoView({ block: "nearest" }); }
     });
+    // The only thing that tells a reader which row Enter will run. Without it the
+    // arrow keys move a purely visual cursor and nothing is announced.
+    const input = $("#palette-query");
+    if (active) input.setAttribute("aria-activedescendant", active.id);
+    else input.removeAttribute("aria-activedescendant");
   }
 
   function runPalette(cmd) {
-    palette.close();
+    // The palette fades out while the command it launched takes over. Navigation
+    // and the create modals both come up inside the 150ms, which reads as a
+    // handoff — the palette is visibly the thing that dispatched it.
+    dismiss(palette);
     if (cmd.route) window.location.hash = `#/${cmd.route}`;
     else if (cmd.run) cmd.run();
   }
 
   function openPalette() {
+    cancelExit(palette);
     const input = $("#palette-query");
     input.value = "";
     renderPalette("");
@@ -1582,12 +1817,25 @@
       if (n.dataset.route === name) n.setAttribute("aria-current", "page");
       else n.removeAttribute("aria-current");
     });
-    $("#crumb-page").textContent = TITLES[name] || "Overview";
+    const label = TITLES[name] || "Overview";
+    $("#crumb-page").textContent = label;
+    // A hash change is not a document load, so nothing updates the window title
+    // or tells a reader the view changed. Both are set here: the title is what
+    // history, tab strips, and bookmarks read, the live region is what a screen
+    // reader hears.
+    document.title = `${label} · Tenancy`;
+    $("#route-status").textContent = label;
 
-    document.body.classList.remove("nav-open");
-    $(".scrim").hidden = true;
+    closeNav();
     host().scrollTop = 0;
     pages[name]();
+    // After pages[name](), not before: view() renders its skeleton synchronously
+    // before its first await, so #page has content to be read by the time focus
+    // lands on it. #page carries tabindex="-1" and `.content:focus` suppresses
+    // the ring, since this is a programmatic move rather than a keyboard one.
+    // A no-op while a modal owns the top layer — the palette dispatching a
+    // navigation is exactly that case, and its own focus restore is correct there.
+    host().focus();
   }
 
   /* ────────────────────────────── Identity ───────────────────────────── */
@@ -1655,9 +1903,13 @@
 
   function authMsg(text, ok = false) {
     const box = $("#auth-alert");
-    box.textContent = text;
     box.classList.toggle("alert--ok", ok);
+    // Unhide first, then write. A role="alert" announces a change to a region
+    // that is already in the accessibility tree; text written while the node is
+    // still [hidden] is the initial content of a region that appears, which is
+    // the weaker of the two cases and not guaranteed to be spoken.
     box.hidden = false;
+    box.textContent = text;
   }
 
   async function enter(tokens) {
@@ -1770,10 +2022,21 @@
       } catch (e) { toast(e.message, "err"); }
     });
 
-    $$("[data-close]").forEach((b) => b.addEventListener("click", (e) => e.currentTarget.closest("dialog").close()));
+    $$("[data-close]").forEach((b) => b.addEventListener("click", (e) => dismiss(e.currentTarget.closest("dialog"))));
 
-    const openNav = () => { document.body.classList.add("nav-open"); $(".scrim").hidden = false; };
-    const closeNav = () => { document.body.classList.remove("nav-open"); $(".scrim").hidden = true; };
+    // Esc closes a <dialog> natively and instantly, which would be the one
+    // dismissal path that skips the exit animation. `cancel` is cancellable, so
+    // the native close is suppressed and the same dismissal the close buttons use
+    // runs instead — the dialog still closes, 150ms later, and Esc keeps working
+    // if this ever fails to attach.
+    [modal, palette, $("#notifications")].forEach((d) => {
+      d.addEventListener("cancel", (e) => {
+        if (exitTimers.has(d)) return; // already leaving: let Esc cut it short
+        e.preventDefault();
+        dismiss(d);
+      });
+    });
+
     $$('[data-nav="open"]').forEach((b) => b.addEventListener("click", openNav));
     $$('[data-nav="close"]').forEach((b) => b.addEventListener("click", closeNav));
 
@@ -1791,6 +2054,14 @@
       if (mod && e.key.toLowerCase() === "k") {
         e.preventDefault();
         if (state.profile) openPalette();
+        return;
+      }
+      // The drawer is not a <dialog>, so it gets no Escape for free, and its only
+      // other dismissal was clicking the scrim — a pointer-only affordance. An
+      // open dialog keeps Escape for itself: it is the topmost surface, and
+      // dismissing two layers on one keypress is not what the reader asked for.
+      if (e.key === "Escape" && document.body.classList.contains("nav-open") && !document.querySelector("dialog[open]")) {
+        closeNav();
         return;
       }
       // "/" focuses search, but not while typing in a field.

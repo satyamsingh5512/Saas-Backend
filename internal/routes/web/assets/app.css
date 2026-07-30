@@ -16,6 +16,15 @@
    component written once against the ramp is correct in both schemes. Nothing
    below the Tokens section may reference a scheme.
 
+   Spacing and type run on named scales declared in Tokens (`--sp-*`, `--fs-*`,
+   indexed by their own pixel value). The two use different units on purpose:
+   spacing is px because it is geometry, type is rem so it follows the reader's
+   browser font-size preference. Below the Tokens section a raw pixel is
+   therefore a claim that the value is geometry rather than spacing — a hairline,
+   a control height, a drawing coordinate, a touch-target offset — and each of
+   the few that remain says which, in a comment, at the point of use. A raw pixel
+   on a `font-size` is always wrong; there are none.
+
    Structure: tokens → base → primitives → components → overlays → auth →
    layout → responsive.
    ========================================================================== */
@@ -59,9 +68,26 @@
   --active: var(--n-200);
   --fill: var(--n-100);
 
+  /* Ink ladder. Measured against --surface, and against --canvas/--sunken/--fill
+     where each is actually used; both schemes hold. Do not lighten any of these
+     without re-measuring — --fg-subtle previously pointed at --n-400, which is
+     2.56:1 on white and failed WCAG AA on the sidebar section labels, palette
+     group headings and key hints, notification timestamps, the "optional" field
+     marker, and every placeholder.
+
+       --fg         17.9 : 1 light   16.0 : 1 dark
+       --fg-muted    7.6 : 1 light    7.7 : 1 dark
+       --fg-subtle   4.8 : 1 light    5.1 : 1 dark   ← AA floor for body text
+
+     Ratios are against --surface and asserted in CI by TestInkRampMeetsWCAGAA
+     (internal/routes/web_contrast_test.go), which parses this file rather than
+     restating these numbers, so they cannot silently drift.
+
+     --n-400 remains in the ramp for non-text use (hairlines, disabled glyphs);
+     it is not a text colour. */
   --fg: var(--n-900);
   --fg-muted: var(--n-600);
-  --fg-subtle: var(--n-400);
+  --fg-subtle: var(--n-500);
 
   --border: var(--n-200);
   --border-strong: var(--n-300);
@@ -89,6 +115,136 @@
     "SF Pro Text", system-ui, sans-serif;
   --mono: "JetBrains Mono", "SF Mono", ui-monospace, Menlo, Consolas, monospace;
 
+  /* Type scale — declared in rem, named by the pixel value each step renders at
+     when the root is left at its 16px default. Both halves of that sentence are
+     load-bearing.
+
+     Why rem: a px font-size ignores a reader who raised their browser's default
+     text size, which is the one accessibility setting a low-vision user is most
+     likely to have already found. Page zoom still scales px, so this is not a
+     WCAG AA failure on its own, but rem is the standard remedy and it costs
+     nothing here — nothing in this file sets a root font-size, so `1rem` is
+     literally whatever the reader asked for. A user at 20px default gets the
+     whole ladder at 1.25x, in proportion, with the em-based letter-spacing
+     tracking along for free.
+
+     Why still named by pixel: 0.8125rem is unreadable as an intent. The name is
+     the design decision ("this is the 13") and the value is its default
+     rendering. Do not renumber these to a ratio scale — the ladder is not
+     geometric and a ratio-based naming would lie about it.
+
+     TYPE ONLY. Spacing, control heights, borders, radii, shadows and icon sizes
+     stay in px, deliberately. A 32px control holding a 16px SVG icon is a
+     geometric contract: put the height on rem and the box grows while the glyph
+     does not, so every icon drifts off centre, hairlines land on fractional
+     device pixels, and the touch-target arithmetic in `.icon-btn::before`
+     stops resolving to 44px. Text should follow the reader's preference;
+     chrome should follow the design. Page zoom scales both together, which is
+     the mechanism that already covers the "everything is too small" case.
+
+     The body range is 10–16 and the steps there are one pixel apart on purpose:
+
+       0.8125rem  13   interactive and body text — buttons, links, inputs, nav,
+                       table cells
+       0.75rem    12   metadata subordinate to a 13 — sub-lines, hints,
+                       timestamps, feet
+       0.6875rem  11   uppercase micro-labels, where caps + tracking carry the
+                       legibility
+       0.625rem   10   the floor: initials in an avatar, a .kbd cap, the 640px
+                       table header
+       0.875rem   14   page-level body prose and large controls
+       0.9375rem  15   card and section titles
+       1rem       16   modal titles — the largest thing that is still a heading,
+                       not display
+
+     12 and 13 are the two workhorses and must not be collapsed into one. Their
+     one-pixel gap — 0.0625rem, exactly one sixteenth — is the whole reason a
+     dense table row reads as main + sub rather than as two peers; unify them
+     and every table flattens at once.
+
+     Above 16 the scale stops being a ladder and becomes display sizes, so it
+     jumps. 26 and 28 both exist and are not redundant: 26 is the KPI figure in
+     a 210px tile, 28 is the price in a wider 228px plan card. Raising 26 to 28
+     would enlarge every tile on the most-viewed page in the app.
+
+     Every value below is an exact sixteenth, so each renders at precisely its
+     named pixel size at a 16px root — no rounding, no sub-pixel drift against
+     the px geometry it sits inside. Keep it that way: a new step must be n/16,
+     which means the ladder can only ever grow in whole pixels. */
+  --fs-10: 0.625rem;    /* 10px */
+  --fs-11: 0.6875rem;   /* 11px */
+  --fs-12: 0.75rem;     /* 12px */
+  --fs-13: 0.8125rem;   /* 13px */
+  --fs-14: 0.875rem;    /* 14px */
+  --fs-15: 0.9375rem;   /* 15px */
+  --fs-16: 1rem;        /* 16px */
+  --fs-20: 1.25rem;     /* 20px */
+  --fs-22: 1.375rem;    /* 22px */
+  --fs-24: 1.5rem;      /* 24px */
+  --fs-26: 1.625rem;    /* 26px */
+  --fs-28: 1.75rem;     /* 28px */
+
+  /* Spacing scale — also named by pixel value, and deliberately asymmetric.
+     Below 12px the UI runs at unit resolution: a single pixel is 8–12% of the
+     value and does real optical work (a checkbox nudged 2px to meet a cap
+     height, 1px between a name and the line under it), so the steps there are
+     contiguous. From 12px up the file was already on a 4px grid, so the steps
+     are strict and skipping one is a visible decision.
+
+     Named by pixel rather than by ordinal (--sp-1 = 4px, Tailwind/Radix style)
+     because the ladder needs 9, 11 and 18, which have no honest ordinal index —
+     and because `var(--sp-11)` needs no lookup table when reading a diff.
+
+     What is NOT on this scale, on purpose:
+       - Widths and heights. Control heights (24/28/30/32/38) are a component
+         contract that keeps buttons and inputs on one baseline; they are not
+         spacing and must not drift onto a spacing step.
+       - Drawing coordinates: the select chevron's gradient stops, the auth
+         panel's grid pitch, the logo mark. Those are one figure's geometry.
+       - Hairlines: borders, outline widths, `translateY(0.5px)`.
+       - Fluid values (clamp) and animation distances. */
+  --sp-1: 1px;
+  --sp-2: 2px;
+  --sp-3: 3px;
+  --sp-4: 4px;
+  --sp-5: 5px;
+  --sp-6: 6px;
+  --sp-7: 7px;
+  --sp-8: 8px;
+  --sp-9: 9px;
+  --sp-10: 10px;
+  --sp-11: 11px;
+  --sp-12: 12px;
+  --sp-14: 14px;
+  --sp-16: 16px;
+  --sp-18: 18px;
+  --sp-20: 20px;
+  --sp-24: 24px;
+  --sp-28: 28px;
+  --sp-32: 32px;
+  --sp-40: 40px;
+  --sp-48: 48px;
+  --sp-56: 56px;
+  --sp-64: 64px;
+
+  /* Four semantic aliases over the numeric layer, the same way --hover and
+     --fg-subtle sit over the neutral ramp. Each one names a relationship that
+     two or more rules have to agree on, so the coupling survives an edit that
+     only touches one of them:
+
+       --row-y      vertical padding of a data row; .table td and .feed__item
+                    share it, which is why a table and a feed scan at the
+                    same rhythm
+       --glyph-gap  distance from a leading glyph or control to its label
+       --pad-card   horizontal padding inside a card or modal. Head, body and
+                    foot MUST resolve to the same value or their contents step
+                    against each other at every internal rule
+       --gutter     the default gap between stacked sibling blocks */
+  --row-y: var(--sp-11);
+  --glyph-gap: var(--sp-10);
+  --pad-card: var(--sp-20);
+  --gutter: var(--sp-16);
+
   /* Radius — 7px controls, 10px cards, 14px overlays. Never pill on an action. */
   --r-sm: 5px;
   --r-md: 7px;
@@ -108,7 +264,37 @@
   --ring-err: 0 0 0 3px color-mix(in srgb, var(--err-solid) 20%, transparent);
   --backdrop: color-mix(in srgb, var(--n-900) 45%, transparent);
 
-  /* Motion — fast, ease-out, user-initiated only. */
+  /* Motion — fast, ease-out, user-initiated only.
+
+     Three tokens, and every animation in the file picks one; there is no
+     bespoke duration below except the drawer's, which is a transition on the
+     panel itself. Rough allocation:
+
+       --t-fast  100   a state change on something already on screen, and the
+                       toast exit — small, peripheral, should just be gone
+       --t       150   an arrival or departure that carries information: a page,
+                       a dialog leaving, a backdrop, the active-nav rail
+       --t-slow  250   the two largest movements — a dialog or slide-over
+                       arriving, and a quota bar drawing itself
+
+     Exits are shorter than the matching entrance, always. An arrival has to be
+     traceable so the eye can find what appeared; a dismissal should feel like
+     it had already happened by the time the pointer lifted.
+
+     Only transform and opacity are animated, with one documented exception
+     (.meter__fill's width, which is a one-off on mount — see the rule). Nothing
+     here animates on scroll, and nothing delays interactivity.
+
+     Everything is neutralised by the prefers-reduced-motion block in Base;
+     anything added here must be reachable by it, including pseudo-elements.
+
+     Three exits cannot be pure CSS: a <dialog> leaves the top layer the instant
+     close() runs, a toast is removed from the DOM, and the drawer scrim is
+     toggled with [hidden]. In all three cases the element the animation needs is
+     already gone. app.js adds `.is-closing`, waits, then performs the removal —
+     so a duration below and a number in app.js describe the same interval and
+     must be changed together. The EXIT table in app.js names the token each of
+     its values mirrors. */
   --ease: cubic-bezier(0.16, 1, 0.3, 1);
   --ease-back: cubic-bezier(0.34, 1.56, 0.64, 1);
   --t-fast: 100ms;
@@ -124,6 +310,30 @@
   --topbar: 52px;
   --max: 1440px;
   --skeleton: linear-gradient(90deg, var(--n-100) 25%, var(--n-200) 50%, var(--n-100) 75%);
+
+  /* Breakpoints are a documented convention, not tokens, because they cannot be
+     tokens: a custom property is resolved against an element, and a media
+     condition is evaluated before any element is involved. `@media (max-width:
+     var(--bp-md))` does not error — it silently never matches, which is the
+     worst possible failure for a layout rule. (`var()` inside a media *block* is
+     fine, including redefining a custom property there; it is only the condition
+     that cannot see one.) @custom-media would solve it and is not Baseline, and
+     nothing in JS reads these numbers, so a comment carries the whole contract:
+
+       1180   the two-column split collapses; the aside column would be narrower
+              than its own 300px minimum below this
+       1024   tablet — the sidebar leaves the grid and becomes an overlay drawer,
+              and the omnibox is dropped since ⌘K still works
+        900   auth only — the claim panel is dropped rather than stacked, so the
+              form never falls below the fold
+        720   KPI tiles relax to a 150px minimum: three still fit across
+        640   phone — page gutters tighten, tables start scrolling horizontally
+              instead of pretending to fit, modal feet stack
+
+     720 and 640 look mergeable and are not: between 641 and 719 the 150px
+     minimum fits three tiles where the 210px default fits two, and that band is
+     exactly the large-phone-landscape / small-tablet range. Each @media below
+     repeats its name so the table stays findable from the rule. */
 }
 
 /* Dark scheme.
@@ -213,7 +423,7 @@ body {
   color: var(--fg);
   font-family: var(--sans);
   /* 14px, not 16px. Stripe is 14, Linear is 13. 16 makes product pages scroll forever. */
-  font-size: 14px;
+  font-size: var(--fs-14);
   line-height: 1.45;
 }
 
@@ -269,21 +479,28 @@ table, .num, .mono, .kpi__value, .kbd { font-variant-numeric: tabular-nums; }
 .icon--xs { width: 14px; height: 14px; }
 .icon--lg { width: 36px; height: 36px; stroke-width: 1.5; }
 
+/* The 1px box and the -1px margin are one trick, not spacing: the element has to
+   keep a non-zero size to stay in the accessibility tree, and the margin pulls
+   that box back out of flow so it displaces nothing. */
 .sr-only {
   position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
   overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
 }
 
 .skip-link {
-  position: fixed; z-index: 100; top: 8px; left: 8px;
+  position: fixed; z-index: 100; top: var(--sp-8); left: var(--sp-8);
   transform: translateY(-200%);
-  padding: 8px 12px; border-radius: var(--r-md);
-  background: var(--brand-600); color: var(--brand-on); font-size: 13px; font-weight: 500;
+  padding: var(--sp-8) var(--sp-12); border-radius: var(--r-md);
+  background: var(--brand-600); color: var(--brand-on); font-size: var(--fs-13); font-weight: 500;
   box-shadow: var(--sh-lg);
   transition: transform var(--t) var(--ease);
 }
 .skip-link:focus { transform: translateY(0); }
 
+/* Reduced motion. The blanket override is deliberate: it neutralises anything
+   added later without that addition having to remember this block exists.
+   0.01ms rather than 0 so `animationend` and `transitionend` still fire — code
+   that waits for one would hang on a duration of exactly zero. */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: 0.01ms !important;
@@ -291,16 +508,30 @@ table, .num, .mono, .kpi__value, .kbd { font-variant-numeric: tabular-nums; }
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
   }
+
+  /* ::backdrop is not reached by `*`, for the same reason ::before and ::after
+     have to be named above — a pseudo-element has to be selected explicitly. It
+     is the dialog backdrops' fade, so without this line the one thing that
+     covers the whole viewport would be the one thing still animating.
+
+     Kept as a separate rule rather than appended to the list above on purpose:
+     an unknown pseudo-element invalidates the entire selector list it appears
+     in, so an engine that could not parse ::backdrop would drop the blanket
+     override with it and reduced motion would stop working altogether. */
+  *::backdrop {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
 }
 
 /* ───────────────────────────── Primitives ───────────────────────────── */
 
 /* Buttons — 32px default. Flat: no gradient, no pill. */
 .btn {
-  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
-  height: 32px; padding: 0 12px;
+  display: inline-flex; align-items: center; justify-content: center; gap: var(--sp-6);
+  height: 32px; padding: 0 var(--sp-12);
   border: 1px solid transparent; border-radius: var(--r-md);
-  font-size: 13px; font-weight: 500; white-space: nowrap;
+  font-size: var(--fs-13); font-weight: 500; white-space: nowrap;
   transition: background-color var(--t-fast) var(--ease),
     border-color var(--t-fast) var(--ease),
     color var(--t-fast) var(--ease),
@@ -330,8 +561,8 @@ table, .num, .mono, .kpi__value, .kbd { font-variant-numeric: tabular-nums; }
 .btn--danger-quiet { color: var(--err-fg); border-color: var(--border-strong); background: var(--surface); }
 .btn--danger-quiet:hover:not([disabled]) { background: var(--err-bg); border-color: var(--err-fg); }
 
-.btn--sm { height: 28px; padding: 0 10px; font-size: 12px; }
-.btn--lg { height: 38px; padding: 0 16px; font-size: 14px; }
+.btn--sm { height: 28px; padding: 0 var(--sp-10); font-size: var(--fs-12); }
+.btn--lg { height: 38px; padding: 0 var(--sp-16); font-size: var(--fs-14); }
 .btn--block { width: 100%; }
 
 .icon-btn {
@@ -343,26 +574,28 @@ table, .num, .mono, .kpi__value, .kbd { font-variant-numeric: tabular-nums; }
 }
 .icon-btn:hover { background: var(--hover); color: var(--fg); }
 .icon-btn:focus-visible { outline: none; box-shadow: var(--ring); }
-/* Expands the touch target to 44px without changing the visual box (WCAG 2.5.5). */
+/* Expands the touch target to 44px without changing the visual box (WCAG 2.5.5).
+   -7px is (44 - 30) / 2 — derived from the button's own size, so it is geometry
+   rather than spacing and must not be moved onto a spacing step. */
 .icon-btn::before { content: ""; position: absolute; inset: -7px; }
 .icon-btn--danger:hover { background: var(--err-bg); color: var(--err-fg); }
 
 .link {
-  color: var(--brand-fg); font-size: 13px; font-weight: 500;
+  color: var(--brand-fg); font-size: var(--fs-13); font-weight: 500;
   border-radius: var(--r-sm);
 }
 .link:hover { text-decoration: underline; text-underline-offset: 2px; }
 
 /* Inputs — same 32px height as buttons so form rows align. */
 .input, .select, .textarea {
-  display: block; width: 100%; height: 32px; padding: 0 10px;
+  display: block; width: 100%; height: 32px; padding: 0 var(--sp-10);
   background: var(--surface); color: var(--fg);
   border: 1px solid var(--border-strong); border-radius: var(--r-md);
   box-shadow: var(--sh-xs);
-  font-size: 13px;
+  font-size: var(--fs-13);
   transition: border-color var(--t) var(--ease), box-shadow var(--t) var(--ease);
 }
-.textarea { height: auto; min-height: 76px; padding: 8px 10px; resize: vertical; line-height: 1.5; }
+.textarea { height: auto; min-height: 76px; padding: var(--sp-8) var(--sp-10); resize: vertical; line-height: 1.5; }
 .input::placeholder, .textarea::placeholder { color: var(--fg-subtle); }
 .input:hover, .select:hover, .textarea:hover { border-color: var(--n-400); }
 .input:focus, .select:focus, .textarea:focus {
@@ -375,9 +608,12 @@ table, .num, .mono, .kpi__value, .kbd { font-variant-numeric: tabular-nums; }
 
 .select {
   appearance: none;
-  padding-right: 30px;
+  padding-right: var(--sp-32);
   /* Chevron drawn with a CSS gradient pair rather than an inline SVG data URI,
-     keeping the stylesheet free of encoded markup. */
+     keeping the stylesheet free of encoded markup. The four offsets below are
+     drawing coordinates for one 8x4 figure, not spacing: they place two 4px
+     triangles side by side and centre them in the 32px control. They stay raw
+     because moving them onto a spacing step would deform the glyph. */
   background-image:
     linear-gradient(45deg, transparent 50%, currentColor 50%),
     linear-gradient(135deg, currentColor 50%, transparent 50%);
@@ -396,34 +632,36 @@ table, .num, .mono, .kpi__value, .kbd { font-variant-numeric: tabular-nums; }
 .input-group:focus-within { border-color: var(--brand-fg); box-shadow: var(--ring); }
 .input-group__prefix {
   align-self: stretch; display: flex; align-items: center;
-  padding: 0 8px; margin-right: 2px;
+  padding: 0 var(--sp-8); margin-right: var(--sp-2);
   border-right: 1px solid var(--border);
   background: var(--sunken); border-radius: var(--r-md) 0 0 var(--r-md);
-  color: var(--fg-subtle); font-family: var(--mono); font-size: 12px; white-space: nowrap;
+  color: var(--fg-subtle); font-family: var(--mono); font-size: var(--fs-12); white-space: nowrap;
 }
 .input--bare { border: 0; background: none; height: 30px; padding-left: 0; box-shadow: none; }
 .input--bare:focus { box-shadow: none; }
 
-.field { display: grid; gap: 6px; }
-.field__row { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
-.field__label { font-size: 13px; font-weight: 500; color: var(--fg); }
+.field { display: grid; gap: var(--sp-6); }
+.field__row { display: flex; align-items: baseline; justify-content: space-between; gap: var(--sp-8); }
+.field__label { font-size: var(--fs-13); font-weight: 500; color: var(--fg); }
 .field__optional { color: var(--fg-subtle); font-weight: 400; }
-.field__hint { font-size: 12px; color: var(--fg-muted); }
-.field__error { font-size: 12px; color: var(--err-fg); }
+.field__hint { font-size: var(--fs-12); color: var(--fg-muted); }
+.field__error { font-size: var(--fs-12); color: var(--err-fg); }
 
-.check { display: flex; align-items: flex-start; gap: 10px; }
-.check input { width: 16px; height: 16px; margin: 2px 0 0; flex: none; accent-color: var(--brand-600); }
-.check__label { font-size: 13px; font-weight: 500; }
-.check__hint { margin-top: 2px; font-size: 12px; color: var(--fg-muted); }
+.check { display: flex; align-items: flex-start; gap: var(--glyph-gap); }
+/* The 2px top margin drops the box from the label's line-box top onto its cap
+   height. Optical, load-bearing, and correct only at this type size. */
+.check input { width: 16px; height: 16px; margin: var(--sp-2) 0 0; flex: none; accent-color: var(--brand-600); }
+.check__label { font-size: var(--fs-13); font-weight: 500; }
+.check__hint { margin-top: var(--sp-2); font-size: var(--fs-12); color: var(--fg-muted); }
 
-.switch-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.switch-row { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-16); }
 
 /* Badges — subtle tint + status text. Radius 5px, never pill. */
 .badge {
-  display: inline-flex; align-items: center; gap: 5px;
-  padding: 2px 7px; border-radius: var(--r-sm);
+  display: inline-flex; align-items: center; gap: var(--sp-5);
+  padding: var(--sp-2) var(--sp-7); border-radius: var(--r-sm);
   background: var(--fill); color: var(--n-700);
-  font-size: 11px; font-weight: 500; white-space: nowrap;
+  font-size: var(--fs-11); font-weight: 500; white-space: nowrap;
 }
 .badge--brand { background: var(--brand-subtle); color: var(--brand-fg); }
 .badge--ok { background: var(--ok-bg); color: var(--ok-fg); }
@@ -431,29 +669,29 @@ table, .num, .mono, .kpi__value, .kbd { font-variant-numeric: tabular-nums; }
 .badge--err { background: var(--err-bg); color: var(--err-fg); }
 .badge--info { background: var(--info-bg); color: var(--info-fg); }
 .badge__dot { width: 5px; height: 5px; border-radius: var(--r-full); background: currentColor; flex: none; }
-.badges { display: flex; flex-wrap: wrap; gap: 4px; }
+.badges { display: flex; flex-wrap: wrap; gap: var(--sp-4); }
 
 .kbd {
   display: inline-flex; align-items: center; justify-content: center;
-  min-width: 18px; height: 18px; padding: 0 4px;
+  min-width: 18px; height: 18px; padding: 0 var(--sp-4);
   background: var(--surface); color: var(--fg-muted);
   border: 1px solid var(--border); border-bottom-width: 2px; border-radius: var(--r-sm);
-  font-family: var(--mono); font-size: 10px; line-height: 1;
+  font-family: var(--mono); font-size: var(--fs-10); line-height: 1;
 }
-.kbds { display: inline-flex; gap: 2px; }
+.kbds { display: inline-flex; gap: var(--sp-2); }
 
 .avatar {
   display: inline-grid; place-items: center; flex: none;
   width: 24px; height: 24px; border-radius: var(--r-full);
   background: var(--active); color: var(--n-700);
-  font-size: 10px; font-weight: 600; letter-spacing: 0.01em;
+  font-size: var(--fs-10); font-weight: 600; letter-spacing: 0.01em;
 }
 .avatar--brand {
   border-radius: var(--r-md);
   background: linear-gradient(140deg, var(--brand-500), var(--brand-700));
   color: #fff; box-shadow: var(--sh-xs);
 }
-.avatar--md { width: 30px; height: 30px; font-size: 11px; }
+.avatar--md { width: 30px; height: 30px; font-size: var(--fs-11); }
 
 .dot { width: 6px; height: 6px; border-radius: var(--r-full); background: currentColor; flex: none; }
 
@@ -463,8 +701,12 @@ table, .num, .mono, .kpi__value, .kbd { font-variant-numeric: tabular-nums; }
 .skel { display: block; height: 12px; border-radius: var(--r-sm); background: var(--skeleton); background-size: 200% 100%; animation: shimmer 1.4s ease-in-out infinite; }
 .skel--text { height: 10px; }
 /* Matches the height and offset of a rendered .kpi__value so the tile does not
-   change size when real data replaces the placeholder. */
-.skel--kpi { height: 24px; margin-top: 12px; }
+   change size when real data replaces the placeholder. The 12px offset is
+   deliberately 2px more than .kpi__value's 10px: the value's line-height of
+   1.15 puts ~2px of half-leading above its caps, so the extra 2px here lands
+   the bar's top edge where the digits' top edge will be. Move one without the
+   other and the tile visibly jumps at the moment the fetch resolves. */
+.skel--kpi { height: 24px; margin-top: var(--sp-12); }
 .skel--w40 { width: 40%; }
 .skel--w60 { width: 60%; }
 .skel--w80 { width: 80%; }
@@ -482,58 +724,83 @@ table, .num, .mono, .kpi__value, .kbd { font-variant-numeric: tabular-nums; }
   box-shadow: var(--sh-xs);
 }
 .card__head {
-  display: flex; align-items: flex-start; justify-content: space-between; gap: 16px;
-  padding: 15px 20px; border-bottom: 1px solid var(--border);
+  display: flex; align-items: flex-start; justify-content: space-between; gap: var(--sp-16);
+  padding: var(--sp-16) var(--pad-card); border-bottom: 1px solid var(--border);
 }
-.card__title { font-size: 15px; font-weight: 600; letter-spacing: -0.006em; }
-.card__sub { margin-top: 3px; font-size: 12px; color: var(--fg-muted); }
-.card__body { padding: 20px; }
+.card__title { font-size: var(--fs-15); font-weight: 600; letter-spacing: -0.006em; }
+.card__sub { margin-top: var(--sp-3); font-size: var(--fs-12); color: var(--fg-muted); }
+.card__body { padding: var(--pad-card); }
 .card__foot {
-  display: flex; align-items: center; justify-content: space-between; gap: 12px;
-  padding: 12px 20px; border-top: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: space-between; gap: var(--sp-12);
+  padding: var(--sp-12) var(--pad-card); border-top: 1px solid var(--border);
   background: var(--sunken); border-radius: 0 0 var(--r-lg) var(--r-lg);
-  font-size: 12px; color: var(--fg-muted);
+  font-size: var(--fs-12); color: var(--fg-muted);
 }
 
 /* KPI tiles */
-.kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; }
+.kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: var(--sp-12); }
 .kpi {
-  padding: 15px 16px 16px;
+  /* Uniform 16px. The top edge was 15px — one less than the other three — to
+     offset the ~1px of half-leading that the 11px uppercase label carries above
+     its caps. That correction is invisible once the tile has a hairline border
+     and a shadow, and an asymmetric padding shorthand costs every later reader a
+     pause to work out whether the difference is meaningful. */
+  padding: var(--sp-16);
   background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-lg);
   box-shadow: var(--sh-xs);
   transition: border-color var(--t) var(--ease), box-shadow var(--t) var(--ease);
 }
 .kpi:hover { border-color: var(--border-strong); box-shadow: var(--sh-sm); }
-.kpi__top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.kpi__label { font-size: 11px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; color: var(--fg-muted); }
+.kpi__top { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-8); }
+.kpi__label { font-size: var(--fs-11); font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; color: var(--fg-muted); }
 /* The glyph sits in a tinted chip: it reads as metadata, not as an action. */
 .kpi__top .icon {
-  box-sizing: content-box; width: 15px; height: 15px; padding: 5px;
+  box-sizing: content-box; width: 15px; height: 15px; padding: var(--sp-5);
   border-radius: var(--r-md); background: var(--brand-subtle); color: var(--brand-fg);
 }
-.kpi__value { display: block; margin-top: 10px; font-size: 26px; font-weight: 600; letter-spacing: -0.025em; line-height: 1.15; }
-.kpi__foot { margin-top: 5px; font-size: 12px; color: var(--fg-muted); }
+/* Offset paired with .skel--kpi above; read that comment before changing it. */
+.kpi__value { display: block; margin-top: var(--sp-10); font-size: var(--fs-26); font-weight: 600; letter-spacing: -0.025em; line-height: 1.15; }
+.kpi__foot { margin-top: var(--sp-5); font-size: var(--fs-12); color: var(--fg-muted); }
 
 /* Usage meters. Fill colour escalates so the ceiling is noticed before a
    create request starts failing with a 403. */
-.meter { margin-top: 12px; }
+.meter { margin-top: var(--sp-12); }
 .meter__track { height: 6px; border-radius: var(--r-full); background: var(--fill); overflow: hidden; }
-.meter__fill { height: 100%; border-radius: var(--r-full); background: var(--brand-600); transition: width var(--t-slow) var(--ease); }
+/* The one width animation in the file, and the only departure from the
+   transform/opacity rule. It is allowed here because it is a one-off on mount
+   and cannot thrash: a keyframe animation plays when an element is first
+   rendered and never again, and app.js builds a fresh .meter__fill on every
+   render rather than resizing an existing one, so there is no re-render path for
+   this to replay on. The layout cost is a 6px-tall strip inside a track with a
+   fixed height, so nothing outside the bar is even measured.
+   scaleX() would be the compositor-friendly form and is wrong here: the fill is
+   a full pill, and scaling one horizontally squashes both rounded caps for the
+   duration — the bar would visibly deform on the way up.
+   The `to` frame is left implicit so it resolves to whatever width app.js wrote,
+   which the stylesheet has no way to know. The transition below is the separate
+   case of a bar whose value changes while mounted; nothing does that today, and
+   it is kept so that adding it later is not a hard jump. */
+.meter__fill {
+  height: 100%; border-radius: var(--r-full); background: var(--brand-600);
+  transition: width var(--t-slow) var(--ease);
+  animation: meter-grow var(--t-slow) var(--ease);
+}
+@keyframes meter-grow { from { width: 0; } }
 .meter__fill--warn { background: #d97706; }
 .meter__fill--full { background: var(--err-solid); }
-.meter__meta { display: flex; justify-content: space-between; margin-top: 7px; font-size: 12px; color: var(--fg-muted); }
+.meter__meta { display: flex; justify-content: space-between; margin-top: var(--sp-7); font-size: var(--fs-12); color: var(--fg-muted); }
 
 /* Tables — sticky header, hairline row separators, no zebra. */
 .table-wrap { overflow-x: auto; }
-.table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.table { width: 100%; border-collapse: collapse; font-size: var(--fs-13); }
 .table th {
   position: sticky; top: 0; z-index: 1;
-  padding: 9px 16px; text-align: left; white-space: nowrap;
+  padding: var(--sp-9) var(--sp-16); text-align: left; white-space: nowrap;
   background: var(--sunken); color: var(--fg-muted);
   border-bottom: 1px solid var(--border);
-  font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase;
+  font-size: var(--fs-11); font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase;
 }
-.table td { padding: 11px 16px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+.table td { padding: var(--row-y) var(--sp-16); border-bottom: 1px solid var(--border); vertical-align: middle; }
 .table tbody tr:last-child td { border-bottom: 0; }
 .table tbody tr { transition: background-color var(--t-fast) var(--ease); }
 .table tbody tr:hover { background: var(--hover); }
@@ -541,71 +808,83 @@ table, .num, .mono, .kpi__value, .kbd { font-variant-numeric: tabular-nums; }
 .table .actions { width: 1%; text-align: right; white-space: nowrap; }
 /* Row actions stay out of the way until the row is engaged, but remain visible
    to keyboard users and on touch, where there is no hover state to reveal them. */
-.row-actions { display: flex; gap: 2px; justify-content: flex-end; }
+.row-actions { display: flex; gap: var(--sp-2); justify-content: flex-end; }
 @media (hover: hover) and (pointer: fine) {
   .row-actions { opacity: 0.55; transition: opacity var(--t-fast) var(--ease); }
   .table tbody tr:hover .row-actions,
   .row-actions:focus-within { opacity: 1; }
 }
 
-.cell { display: grid; gap: 1px; min-width: 0; }
+.cell { display: grid; gap: var(--sp-1); min-width: 0; }
 .cell__main { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.cell__sub { font-size: 12px; color: var(--fg-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cell__sub { font-size: var(--fs-12); color: var(--fg-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cell--muted { color: var(--fg-muted); }
-.cell--mono { font-family: var(--mono); font-size: 12px; color: var(--fg-muted); }
-.identity { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.cell--mono { font-family: var(--mono); font-size: var(--fs-12); color: var(--fg-muted); }
+.identity { display: flex; align-items: center; gap: var(--glyph-gap); min-width: 0; }
 
 /* Empty states — one line-art icon, declarative heading, one action. */
-.empty { display: flex; flex-direction: column; align-items: center; padding: 56px 24px; text-align: center; }
+.empty { display: flex; flex-direction: column; align-items: center; padding: var(--sp-56) var(--sp-24); text-align: center; }
 .empty .icon--lg {
-  box-sizing: content-box; padding: 12px; border-radius: var(--r-xl);
+  box-sizing: content-box; padding: var(--sp-12); border-radius: var(--r-xl);
   background: var(--fill); color: var(--fg-subtle);
 }
-.empty__title { margin-top: 16px; font-size: 15px; font-weight: 600; }
-.empty__text { margin-top: 5px; max-width: 380px; font-size: 13px; color: var(--fg-muted); }
-.empty__actions { display: flex; gap: 8px; margin-top: 20px; }
+.empty__title { margin-top: var(--sp-16); font-size: var(--fs-15); font-weight: 600; }
+.empty__text { margin-top: var(--sp-5); max-width: 380px; font-size: var(--fs-13); color: var(--fg-muted); }
+.empty__actions { display: flex; gap: var(--sp-8); margin-top: var(--sp-20); }
 
 /* Toolbar above tables */
-.toolbar { display: flex; align-items: center; gap: 8px; padding: 12px 16px; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+.toolbar { display: flex; align-items: center; gap: var(--sp-8); padding: var(--sp-12) var(--sp-16); border-bottom: 1px solid var(--border); flex-wrap: wrap; }
 .search { position: relative; flex: 1; min-width: 180px; max-width: 320px; }
-.search .icon { position: absolute; left: 9px; top: 8px; color: var(--fg-subtle); pointer-events: none; }
-.search .input { padding-left: 31px; }
+/* The glyph is absolutely positioned, so it is out of flow and the input has to
+   reserve its column by hand. Both values below are one relationship:
+     left  = the inset the glyph sits at
+     top   = (32px control height - 16px .icon--sm) / 2, i.e. centred
+     input's padding-left = that inset + the glyph's width + the gap that keeps
+                            the query text off it
+   Written as a calc so the three terms stay visibly linked; change the inset and
+   the padding follows. 16px is .icon--sm's own size, which lives on the size
+   axis, not the spacing scale. */
+.search .icon { position: absolute; left: var(--sp-10); top: var(--sp-8); color: var(--fg-subtle); pointer-events: none; }
+.search .input { padding-left: calc(var(--sp-10) + 16px + var(--sp-6)); }
 
-.segment { display: inline-flex; gap: 2px; padding: 2px; background: var(--fill); border-radius: var(--r-md); }
+.segment { display: inline-flex; gap: var(--sp-2); padding: var(--sp-2); background: var(--fill); border-radius: var(--r-md); }
 .segment__btn {
-  height: 24px; padding: 0 10px; border-radius: var(--r-sm);
-  font-size: 12px; font-weight: 500; color: var(--fg-muted);
+  height: 24px; padding: 0 var(--sp-10); border-radius: var(--r-sm);
+  font-size: var(--fs-12); font-weight: 500; color: var(--fg-muted);
   transition: background-color var(--t-fast) var(--ease), color var(--t-fast) var(--ease), box-shadow var(--t-fast) var(--ease);
 }
 .segment__btn:hover { color: var(--fg); }
 .segment__btn[aria-pressed="true"] { background: var(--surface); color: var(--fg); box-shadow: var(--sh-xs); }
 
-.pager { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 16px; border-top: 1px solid var(--border); font-size: 12px; color: var(--fg-muted); }
-.pager__btns { display: flex; gap: 6px; }
+.pager { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-12); padding: var(--sp-10) var(--sp-16); border-top: 1px solid var(--border); font-size: var(--fs-12); color: var(--fg-muted); }
+.pager__btns { display: flex; gap: var(--sp-6); }
 
 /* Definition rows */
 .dl { display: grid; }
-.dl > div { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; padding: 10px 0; border-bottom: 1px solid var(--border); }
+.dl > div { display: flex; align-items: baseline; justify-content: space-between; gap: var(--sp-16); padding: var(--sp-10) 0; border-bottom: 1px solid var(--border); }
 .dl > div:first-child { padding-top: 0; }
 .dl > div:last-child { border-bottom: 0; padding-bottom: 0; }
-.dl dt { font-size: 12px; color: var(--fg-muted); }
-.dl dd { font-size: 13px; font-weight: 500; text-align: right; word-break: break-word; }
+.dl dt { font-size: var(--fs-12); color: var(--fg-muted); }
+.dl dd { font-size: var(--fs-13); font-weight: 500; text-align: right; word-break: break-word; }
 
 /* Settings form rows: label column left, control right. */
-.form-row { display: grid; grid-template-columns: minmax(0, 220px) minmax(0, 1fr); gap: 24px; padding: 18px 0; border-bottom: 1px solid var(--border); }
+.form-row { display: grid; grid-template-columns: minmax(0, 220px) minmax(0, 1fr); gap: var(--sp-24); padding: var(--sp-18) 0; border-bottom: 1px solid var(--border); }
 .form-row:first-of-type { padding-top: 0; }
 .form-row:last-of-type { border-bottom: 0; }
-.form-row__label { font-size: 13px; font-weight: 500; }
-.form-row__hint { margin-top: 3px; font-size: 12px; color: var(--fg-muted); }
-.form { display: grid; gap: 16px; }
+/* `display: block` is not decoration: these are <label> elements so the control
+   they name is programmatically associated, and a label is inline by default,
+   which would let the hint beneath it share a line. */
+.form-row__label { display: block; font-size: var(--fs-13); font-weight: 500; }
+.form-row__hint { margin-top: var(--sp-3); font-size: var(--fs-12); color: var(--fg-muted); }
+.form { display: grid; gap: var(--gutter); }
 /* Save row for an in-page settings form. Distinct from .modal__foot: inside a
    card body a tinted, corner-rounded bar would read as a stray panel. */
-.form-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--border); }
+.form-actions { display: flex; justify-content: flex-end; gap: var(--sp-8); margin-top: var(--sp-18); padding-top: var(--sp-16); border-top: 1px solid var(--border); }
 
 /* Plan cards */
-.plans { display: grid; grid-template-columns: repeat(auto-fit, minmax(228px, 1fr)); gap: 12px; }
+.plans { display: grid; grid-template-columns: repeat(auto-fit, minmax(228px, 1fr)); gap: var(--sp-12); }
 .plan {
-  display: flex; flex-direction: column; padding: 20px;
+  display: flex; flex-direction: column; padding: var(--pad-card);
   background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-lg);
   box-shadow: var(--sh-xs);
   transition: border-color var(--t) var(--ease), box-shadow var(--t) var(--ease), transform var(--t) var(--ease);
@@ -618,52 +897,55 @@ table, .num, .mono, .kpi__value, .kbd { font-variant-numeric: tabular-nums; }
   box-shadow: var(--sh-sm), inset 0 2px 0 0 var(--brand-600);
   background: var(--brand-subtle);
 }
-.plan__name { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 14px; font-weight: 600; }
-.plan__price { margin-top: 12px; font-size: 28px; font-weight: 600; letter-spacing: -0.025em; line-height: 1.1; }
-.plan__per { font-size: 12px; font-weight: 400; color: var(--fg-muted); }
-.plan__list { display: grid; gap: 8px; margin: 16px 0 20px; }
-.plan__list li { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--fg-muted); }
+.plan__name { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-8); font-size: var(--fs-14); font-weight: 600; }
+.plan__price { margin-top: var(--sp-12); font-size: var(--fs-28); font-weight: 600; letter-spacing: -0.025em; line-height: 1.1; }
+.plan__per { font-size: var(--fs-12); font-weight: 400; color: var(--fg-muted); }
+.plan__list { display: grid; gap: var(--sp-8); margin: var(--sp-16) 0 var(--sp-20); }
+.plan__list li { display: flex; align-items: center; gap: var(--sp-8); font-size: var(--fs-12); color: var(--fg-muted); }
 .plan__list .icon { width: 14px; height: 14px; color: var(--ok-fg); }
 .plan .btn { margin-top: auto; width: 100%; }
 
 /* Activity feed */
 .feed { display: grid; }
-.feed__item { display: flex; align-items: flex-start; gap: 11px; padding: 11px 0; border-bottom: 1px solid var(--border); }
+.feed__item { display: flex; align-items: flex-start; gap: var(--sp-11); padding: var(--row-y) 0; border-bottom: 1px solid var(--border); }
 .feed__item:first-child { padding-top: 0; }
 .feed__item:last-child { border-bottom: 0; padding-bottom: 0; }
 .feed__icon { display: grid; place-items: center; width: 28px; height: 28px; flex: none; border-radius: var(--r-md); background: var(--fill); color: var(--fg-muted); }
 .feed__body { min-width: 0; }
-.feed__title { font-size: 13px; font-weight: 500; }
-.feed__meta { margin-top: 1px; font-size: 12px; color: var(--fg-muted); }
+.feed__title { font-size: var(--fs-13); font-weight: 500; }
+.feed__meta { margin-top: var(--sp-1); font-size: var(--fs-12); color: var(--fg-muted); }
 
 /* Alerts / callouts */
 .alert {
-  display: flex; gap: 8px; padding: 10px 12px;
+  display: flex; gap: var(--sp-8); padding: var(--sp-10) var(--sp-12);
   border: 1px solid color-mix(in srgb, var(--err-fg) 30%, transparent);
   border-radius: var(--r-md);
   background: var(--err-bg); color: var(--err-fg);
-  font-size: 12px; line-height: 1.5;
+  font-size: var(--fs-12); line-height: 1.5;
 }
 .alert--ok {
   background: var(--ok-bg); color: var(--ok-fg);
   border-color: color-mix(in srgb, var(--ok-fg) 30%, transparent);
 }
-.callout { padding: 12px 14px; border-radius: var(--r-md); background: var(--brand-subtle); border: 1px solid color-mix(in srgb, var(--brand-600) 22%, transparent); }
-.callout__title { font-size: 13px; font-weight: 600; }
-.callout__text { margin-top: 3px; font-size: 12px; color: var(--fg-muted); }
+.callout { padding: var(--sp-12) var(--sp-14); border-radius: var(--r-md); background: var(--brand-subtle); border: 1px solid color-mix(in srgb, var(--brand-600) 22%, transparent); }
+.callout__title { font-size: var(--fs-13); font-weight: 600; }
+.callout__text { margin-top: var(--sp-3); font-size: var(--fs-12); color: var(--fg-muted); }
 
 /* One-time secret reveal */
-.secret { display: flex; align-items: center; gap: 8px; margin-top: 14px; padding: 10px 10px 10px 12px; border: 1px solid color-mix(in srgb, var(--warn-fg) 45%, transparent); border-radius: var(--r-md); background: var(--warn-bg); }
-.secret code { flex: 1; min-width: 0; overflow-x: auto; font-family: var(--mono); font-size: 12px; color: var(--warn-fg); white-space: nowrap; }
+/* Padding is 10px on three sides and 12px on the left: the right edge is closed
+   by a 30px copy button whose own optical inset supplies the rest, while the
+   left edge has bare monospace text against it. */
+.secret { display: flex; align-items: center; gap: var(--sp-8); margin-top: var(--sp-14); padding: var(--sp-10) var(--sp-10) var(--sp-10) var(--sp-12); border: 1px solid color-mix(in srgb, var(--warn-fg) 45%, transparent); border-radius: var(--r-md); background: var(--warn-bg); }
+.secret code { flex: 1; min-width: 0; overflow-x: auto; font-family: var(--mono); font-size: var(--fs-12); color: var(--warn-fg); white-space: nowrap; }
 
 /* Scope / permission picker */
-.picker { display: grid; grid-template-columns: repeat(auto-fill, minmax(196px, 1fr)); gap: 6px; max-height: 40vh; overflow-y: auto; padding: 2px; }
-.picker__opt { display: flex; align-items: flex-start; gap: 8px; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--r-md); cursor: pointer; transition: border-color var(--t-fast) var(--ease), background-color var(--t-fast) var(--ease); }
+.picker { display: grid; grid-template-columns: repeat(auto-fill, minmax(196px, 1fr)); gap: var(--sp-6); max-height: 40vh; overflow-y: auto; padding: var(--sp-2); }
+.picker__opt { display: flex; align-items: flex-start; gap: var(--sp-8); padding: var(--sp-8) var(--sp-10); border: 1px solid var(--border); border-radius: var(--r-md); cursor: pointer; transition: border-color var(--t-fast) var(--ease), background-color var(--t-fast) var(--ease); }
 .picker__opt:hover { background: var(--hover); border-color: var(--border-strong); }
 .picker__opt:has(input:checked) { border-color: var(--brand-fg); background: var(--brand-subtle); }
-.picker__opt input { width: 15px; height: 15px; margin: 1px 0 0; flex: none; accent-color: var(--brand-600); }
-.picker__code { font-family: var(--mono); font-size: 11px; }
-.picker__desc { display: block; margin-top: 1px; font-size: 11px; color: var(--fg-muted); line-height: 1.35; }
+.picker__opt input { width: 15px; height: 15px; margin: var(--sp-1) 0 0; flex: none; accent-color: var(--brand-600); }
+.picker__code { font-family: var(--mono); font-size: var(--fs-11); }
+.picker__desc { display: block; margin-top: var(--sp-1); font-size: var(--fs-11); color: var(--fg-muted); line-height: 1.35; }
 
 /* ─────────────────────────────── Overlays ─────────────────────────────── */
 
@@ -671,23 +953,61 @@ table, .num, .mono, .kpi__value, .kbd { font-variant-numeric: tabular-nums; }
   padding: 0; border: 1px solid var(--border); color: var(--fg);
   background: var(--elevated); box-shadow: var(--sh-xl);
 }
+/* The backdrop fades with the dialog rather than snapping in under it. Before
+   this it was the loudest cut in the app: the panel eased in over 250ms while
+   45% of the viewport went dark in a single frame, which read as a flash rather
+   than as a layer arriving. 150ms — shorter than the panel — so the dim is
+   settled by the time the panel finishes and the eye lands on the panel, not on
+   the dark. No selector needs [open]: ::backdrop only exists while the dialog is
+   in the top layer, so the animation can only ever run at the right moment. */
 .modal::backdrop, .sheet::backdrop, .palette::backdrop {
   background: var(--backdrop);
   backdrop-filter: blur(2px);
+  animation: backdrop-in var(--t) var(--ease);
 }
+@keyframes backdrop-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes backdrop-out { from { opacity: 1; } to { opacity: 0; } }
+/* Exit. `.is-closing` is written by app.js, which closes the dialog once this
+   duration has elapsed — CSS cannot do it alone because close() removes the
+   element from the top layer in the same frame, taking the backdrop with it.
+   `forwards` holds the last frame so the gap between the animation ending and
+   the close landing cannot flash back to full opacity. Specificity (0,2,0 over
+   0,1,0) carries this past the entrance rule without depending on source order. */
+.modal.is-closing::backdrop,
+.sheet.is-closing::backdrop,
+.palette.is-closing::backdrop { animation: backdrop-out var(--t) var(--ease) forwards; }
 
-.modal { width: min(520px, calc(100vw - 32px)); border-radius: var(--r-xl); }
+/* An overlay on its way out must stop taking input. It is still open and still
+   hit-testable for the length of its exit, so without this a second click can
+   land on a control inside a dialog that is already visibly leaving — the exact
+   double-submit the disabled button in formModal() exists to prevent. */
+.modal.is-closing, .sheet.is-closing, .palette.is-closing { pointer-events: none; }
+
+/* The viewport subtraction is a gutter: it keeps a 16px margin on each side of a
+   dialog once the viewport is narrower than the dialog's preferred width. */
+.modal { width: min(520px, calc(100vw - var(--sp-32))); border-radius: var(--r-xl); }
 .modal[open] { animation: dialog-in var(--t-slow) var(--ease-back); }
-.modal--wide { width: min(680px, calc(100vw - 32px)); }
+.modal--wide { width: min(680px, calc(100vw - var(--sp-32))); }
+/* The 8px here is an animation distance, not spacing: it is how far the dialog
+   travels, and it is tuned against --t-slow rather than against the layout. */
 @keyframes dialog-in { from { opacity: 0; transform: translateY(8px) scale(0.98); } to { opacity: 1; transform: none; } }
+/* Exit: the entrance reversed, at --t instead of --t-slow and with --ease rather
+   than --ease-back. The overshoot is what makes an arrival feel placed; on the
+   way out it would read as a bounce, and a dialog should look decided when it
+   leaves. 4px of travel, not 8 — half the distance in 60% of the time.
+   Selector is [open].is-closing so it outranks the entrance rule (0,3,0 over
+   0,2,0) wherever either sits in the file; a closing dialog is still open. */
+.modal[open].is-closing,
+.palette[open].is-closing { animation: dialog-out var(--t) var(--ease) forwards; }
+@keyframes dialog-out { from { opacity: 1; transform: none; } to { opacity: 0; transform: translateY(4px) scale(0.99); } }
 
-.modal__head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding: 20px 20px 0; }
-.modal__title { font-size: 16px; font-weight: 600; letter-spacing: -0.01em; }
-.modal__desc { margin-top: 6px; font-size: 13px; color: var(--fg-muted); line-height: 1.5; }
-.modal__body { padding: 18px 20px; display: grid; gap: 16px; }
+.modal__head { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--sp-16); padding: var(--pad-card) var(--pad-card) 0; }
+.modal__title { font-size: var(--fs-16); font-weight: 600; letter-spacing: -0.01em; }
+.modal__desc { margin-top: var(--sp-6); font-size: var(--fs-13); color: var(--fg-muted); line-height: 1.5; }
+.modal__body { padding: var(--sp-18) var(--pad-card); display: grid; gap: var(--gutter); }
 .modal__foot {
-  display: flex; align-items: center; justify-content: flex-end; gap: 8px;
-  padding: 14px 20px; border-top: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: flex-end; gap: var(--sp-8);
+  padding: var(--sp-14) var(--pad-card); border-top: 1px solid var(--border);
   background: var(--sunken); border-radius: 0 0 var(--r-xl) var(--r-xl);
 }
 
@@ -698,57 +1018,88 @@ table, .num, .mono, .kpi__value, .kbd { font-variant-numeric: tabular-nums; }
   border-radius: 0; border-width: 0 0 0 1px;
   display: flex; flex-direction: column;
 }
-.sheet[open] { animation: sheet-in 300ms var(--ease); }
+/* 300ms was the one bespoke duration in the file; --t-slow is 250 and is already
+   what the modal arrives on, so the two overlays now agree. The slide-over is the
+   longest single movement in the app — 420px — which is why it takes the slowest
+   token rather than --t. */
+.sheet[open] { animation: sheet-in var(--t-slow) var(--ease); }
 @keyframes sheet-in { from { transform: translateX(100%); } to { transform: none; } }
-.sheet__head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 16px; border-bottom: 1px solid var(--border); }
-.sheet__title { font-size: 15px; font-weight: 600; }
-.sheet__actions { display: flex; align-items: center; gap: 4px; }
-.sheet__body { flex: 1; overflow-y: auto; padding: 8px; }
+/* Leaves the way it came, at --t. Faster than the arrival even though it covers
+   the same 420px: a panel being dismissed does not need to be followed. Opacity
+   is left alone — the panel is opaque and edge-anchored, so translateX reads as
+   "gone off the side" on its own, and fading it as well would make it dissolve
+   in place instead. */
+.sheet[open].is-closing { animation: sheet-out var(--t) var(--ease) forwards; }
+@keyframes sheet-out { from { transform: none; } to { transform: translateX(100%); } }
+.sheet__head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-12); padding: var(--sp-14) var(--sp-16); border-bottom: 1px solid var(--border); }
+.sheet__title { font-size: var(--fs-15); font-weight: 600; }
+.sheet__actions { display: flex; align-items: center; gap: var(--sp-4); }
+.sheet__body { flex: 1; overflow-y: auto; padding: var(--sp-8); }
+/* The notifications list is fetched after the panel is already on screen, so the
+   skeleton is replaced by real rows in one frame with nothing to soften it.
+   Opacity only, and no transform: the list can be 25 rows, they are all inserted
+   in the same frame, and 25 simultaneous transforms to say one thing is waste.
+   Fading them together reads as a single block resolving, which is what it is. */
+.sheet__body > * { animation: fade-in var(--t) var(--ease); }
+@keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
 
 /* Command palette */
-.palette { width: min(600px, calc(100vw - 32px)); margin-top: 12vh; border-radius: var(--r-xl); overflow: hidden; }
+.palette { width: min(600px, calc(100vw - var(--sp-32))); margin-top: 12vh; border-radius: var(--r-xl); overflow: hidden; }
 .palette[open] { animation: dialog-in var(--t-slow) var(--ease-back); }
-.palette__input { display: flex; align-items: center; gap: 9px; padding: 0 14px; border-bottom: 1px solid var(--border); }
+.palette__input { display: flex; align-items: center; gap: var(--sp-9); padding: 0 var(--sp-14); border-bottom: 1px solid var(--border); }
 .palette__input .icon { color: var(--fg-subtle); }
-.palette__input input { flex: 1; height: 48px; border: 0; background: none; font-size: 14px; }
+.palette__input input { flex: 1; height: 48px; border: 0; background: none; font-size: var(--fs-14); }
 /* The dialog itself is the focused surface — it opens with focus in this field,
    and the highlighted row is the visible focus indicator. An outline around a
    borderless full-width input reads as a stray box. */
 .palette__input input:focus-visible { outline: none; }
 .palette__input input::placeholder { color: var(--fg-subtle); }
-.palette__list { max-height: min(380px, 50vh); overflow-y: auto; padding: 6px; }
-.palette__group { padding: 8px 8px 4px; font-size: 11px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; color: var(--fg-subtle); }
-.palette__item { display: flex; align-items: center; gap: 9px; width: 100%; height: 34px; padding: 0 8px; border-radius: var(--r-md); font-size: 13px; text-align: left; color: var(--fg); }
+.palette__list { max-height: min(380px, 50vh); overflow-y: auto; padding: var(--sp-6); }
+.palette__group { padding: var(--sp-8) var(--sp-8) var(--sp-4); font-size: var(--fs-11); font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; color: var(--fg-subtle); }
+.palette__item { display: flex; align-items: center; gap: var(--sp-9); width: 100%; height: 34px; padding: 0 var(--sp-8); border-radius: var(--r-md); font-size: var(--fs-13); text-align: left; color: var(--fg); }
 .palette__item .icon { color: var(--fg-subtle); }
 .palette__item:hover { background: var(--hover); }
 .palette__item[aria-selected="true"] { background: var(--brand-subtle); color: var(--brand-fg); }
 .palette__item[aria-selected="true"] .icon { color: currentColor; }
-.palette__hint { margin-left: auto; font-family: var(--mono); font-size: 11px; color: var(--fg-subtle); }
-.palette__foot { display: flex; gap: 14px; padding: 8px 12px; border-top: 1px solid var(--border); background: var(--sunken); font-size: 11px; color: var(--fg-subtle); }
-.palette__foot span { display: inline-flex; align-items: center; gap: 4px; }
-.palette__empty { padding: 28px; text-align: center; font-size: 13px; color: var(--fg-muted); }
+.palette__hint { margin-left: auto; font-family: var(--mono); font-size: var(--fs-11); color: var(--fg-subtle); }
+.palette__foot { display: flex; gap: var(--sp-14); padding: var(--sp-8) var(--sp-12); border-top: 1px solid var(--border); background: var(--sunken); font-size: var(--fs-11); color: var(--fg-subtle); }
+.palette__foot span { display: inline-flex; align-items: center; gap: var(--sp-4); }
+/* The empty message is a sibling of the list, not a child, because a listbox may
+   only own options. That leaves an empty list still paying its own padding, so
+   collapse it — otherwise moving the message shifted the panel by 12px. */
+.palette__list:empty { padding: 0; }
+.palette__empty { padding: var(--sp-28); text-align: center; font-size: var(--fs-13); color: var(--fg-muted); }
 
 /* Toasts */
-.toaster { position: fixed; z-index: 200; right: 16px; bottom: 16px; display: flex; flex-direction: column-reverse; gap: 8px; width: min(360px, calc(100vw - 32px)); pointer-events: none; }
+.toaster { position: fixed; z-index: 200; right: var(--sp-16); bottom: var(--sp-16); display: flex; flex-direction: column-reverse; gap: var(--sp-8); width: min(360px, calc(100vw - var(--sp-32))); pointer-events: none; }
 .toast {
-  display: flex; align-items: flex-start; gap: 10px; padding: 11px 12px;
+  display: flex; align-items: flex-start; gap: var(--glyph-gap); padding: var(--sp-11) var(--sp-12);
   background: var(--elevated); border: 1px solid var(--border); border-radius: var(--r-lg);
   box-shadow: var(--sh-lg); animation: toast-in var(--t-slow) var(--ease);
   pointer-events: auto;
 }
 @keyframes toast-in { from { opacity: 0; transform: translateX(10px) scale(0.98); } to { opacity: 1; transform: none; } }
-.toast__icon { flex: none; margin-top: 1px; }
+/* Exit at --t-fast, the shortest token: a toast leaves on a timer the reader did
+   not ask for, so it should be gone before it draws a second look. It slides out
+   the way it came in, which is also the only cue that separates "it expired" from
+   "it vanished". The stack collapse underneath is instant and stays that way —
+   animating the height of a live flex column would be the one thing here capable
+   of thrashing layout, and this is the one place that can have several at once.
+   pointer-events off so a click cannot land on a toast mid-departure. */
+.toast.is-closing { animation: toast-out var(--t-fast) var(--ease) forwards; pointer-events: none; }
+@keyframes toast-out { from { opacity: 1; transform: none; } to { opacity: 0; transform: translateX(10px); } }
+.toast__icon { flex: none; margin-top: var(--sp-1); }
 .toast--ok .toast__icon { color: var(--ok-fg); }
 .toast--err .toast__icon { color: var(--err-fg); }
 .toast--info .toast__icon { color: var(--info-fg); }
-.toast__text { flex: 1; min-width: 0; font-size: 13px; }
+.toast__text { flex: 1; min-width: 0; font-size: var(--fs-13); }
 
-.notif { display: block; width: 100%; padding: 11px 12px; border-radius: var(--r-md); text-align: left; }
+.notif { display: block; width: 100%; padding: var(--sp-11) var(--sp-12); border-radius: var(--r-md); text-align: left; }
 .notif:hover { background: var(--hover); }
 .notif--unread { background: var(--brand-subtle); }
-.notif__title { font-size: 13px; font-weight: 500; }
-.notif__text { margin-top: 2px; font-size: 12px; color: var(--fg-muted); }
-.notif__time { margin-top: 5px; display: block; font-family: var(--mono); font-size: 11px; color: var(--fg-subtle); }
+.notif__title { font-size: var(--fs-13); font-weight: 500; }
+.notif__text { margin-top: var(--sp-2); font-size: var(--fs-12); color: var(--fg-muted); }
+.notif__time { margin-top: var(--sp-5); display: block; font-family: var(--mono); font-size: var(--fs-11); color: var(--fg-subtle); }
 
 /* ──────────────────────────────── Auth ──────────────────────────────── */
 
@@ -765,14 +1116,16 @@ table, .num, .mono, .kpi__value, .kbd { font-variant-numeric: tabular-nums; }
 .auth__aside {
   position: relative; overflow: hidden;
   display: flex; align-items: center;
-  padding: 48px clamp(32px, 6vw, 88px);
+  padding: var(--sp-48) clamp(32px, 6vw, 88px);
   background:
     radial-gradient(120% 90% at 12% 0%, color-mix(in srgb, var(--brand-500) 34%, transparent), transparent 60%),
     radial-gradient(90% 80% at 88% 100%, color-mix(in srgb, var(--brand-800) 42%, transparent), transparent 62%),
     var(--art-ink);
   color: #fff;
 }
-/* Hairline grid, drawn in CSS so no image asset or extra origin is involved. */
+/* Hairline grid, drawn in CSS so no image asset or extra origin is involved.
+   48px is the texture's pitch — a drawing coordinate, not spacing; it is chosen
+   against the mask's falloff, not against any element's padding. */
 .auth__aside::after {
   content: ""; position: absolute; inset: 0; pointer-events: none;
   background-image:
@@ -783,34 +1136,44 @@ table, .num, .mono, .kpi__value, .kbd { font-variant-numeric: tabular-nums; }
 }
 .auth__aside-inner { position: relative; z-index: 1; max-width: 460px; }
 
-.auth__pitch { margin-top: 40px; font-size: clamp(26px, 2.6vw, 34px); font-weight: 600; letter-spacing: -0.03em; line-height: 1.18; }
-.auth__lede { margin-top: 14px; max-width: 42ch; font-size: 14px; line-height: 1.6; color: rgb(255 255 255 / 0.72); }
-.auth__points { display: grid; gap: 12px; margin-top: 32px; }
-.auth__points li { display: flex; align-items: flex-start; gap: 10px; font-size: 13px; color: rgb(255 255 255 / 0.86); }
+/* The one fluid type size in the file. Bounds are rem for the same reason the
+   scale is — a reader at a 20px default gets a 32.5px floor instead of a 26px
+   one — while the preferred term stays viewport-relative, which is the point of
+   the clamp. Left as literals rather than tokens: 26 has a step (--fs-26) but 34
+   does not, and it is a display size for one figure on one screen, not a rung
+   the rest of the app can reach for. Do not add --fs-34 for it. */
+.auth__pitch { margin-top: var(--sp-40); font-size: clamp(1.625rem, 2.6vw, 2.125rem); /* 26px … 34px */ font-weight: 600; letter-spacing: -0.03em; line-height: 1.18; }
+.auth__lede { margin-top: var(--sp-14); max-width: 42ch; font-size: var(--fs-14); line-height: 1.6; color: rgb(255 255 255 / 0.72); }
+.auth__points { display: grid; gap: var(--sp-12); margin-top: var(--sp-32); }
+.auth__points li { display: flex; align-items: flex-start; gap: var(--glyph-gap); font-size: var(--fs-13); color: rgb(255 255 255 / 0.86); }
 .auth__points .icon {
-  box-sizing: content-box; width: 13px; height: 13px; padding: 4px; margin-top: 1px;
+  box-sizing: content-box; width: 13px; height: 13px; padding: var(--sp-4); margin-top: var(--sp-1);
   border-radius: var(--r-full); background: rgb(255 255 255 / 0.12); color: #fff;
 }
-.auth__note { margin-top: 40px; padding-top: 20px; border-top: 1px solid rgb(255 255 255 / 0.12); font-size: 12px; line-height: 1.6; color: rgb(255 255 255 / 0.6); }
+.auth__note { margin-top: var(--sp-40); padding-top: var(--sp-20); border-top: 1px solid rgb(255 255 255 / 0.12); font-size: var(--fs-12); line-height: 1.6; color: rgb(255 255 255 / 0.6); }
 
-.auth__main { position: relative; display: grid; place-items: center; padding: 40px 24px 56px; overflow-y: auto; }
-.auth__theme { position: absolute; top: 16px; right: 16px; }
+.auth__main { position: relative; display: grid; place-items: center; padding: var(--sp-40) var(--sp-24) var(--sp-56); overflow-y: auto; }
+.auth__theme { position: absolute; top: var(--sp-16); right: var(--sp-16); }
 .auth__panel { width: min(384px, 100%); }
-.auth__brand { display: flex; align-items: center; gap: 9px; }
+.auth__brand { display: flex; align-items: center; gap: var(--sp-9); }
 /* The wordmark repeats in the form column only when the claim panel is gone. */
-.auth__panel .auth__brand { display: none; margin-bottom: 28px; }
+.auth__panel .auth__brand { display: none; margin-bottom: var(--sp-28); }
 
 .logo { display: grid; place-items: center; width: 30px; height: 30px; flex: none; border-radius: var(--r-md); background: linear-gradient(140deg, var(--brand-500), var(--brand-700)); box-shadow: var(--sh-sm); }
+/* The mark is one figure: a 12px square with a 2.5px stroke and a 3px corner.
+   Those three numbers are proportional to each other, not to the layout. */
 .logo__mark { width: 12px; height: 12px; border-radius: 3px; border: 2.5px solid #fff; }
-.logo__word { font-size: 15px; font-weight: 600; letter-spacing: -0.015em; }
+.logo__word { font-size: var(--fs-15); font-weight: 600; letter-spacing: -0.015em; }
 
-.auth__title { font-size: 24px; font-weight: 600; letter-spacing: -0.03em; }
-.auth__sub { margin-top: 6px; font-size: 13px; color: var(--fg-muted); }
-.auth .form, .auth .alert { margin-top: 22px; }
-.auth .form { gap: 15px; }
-.auth .btn--primary { height: 38px; margin-top: 4px; font-size: 14px; }
-.auth__switch { margin-top: 22px; padding-top: 18px; border-top: 1px solid var(--border); font-size: 13px; color: var(--fg-muted); }
-.auth__switch .link { margin-left: 2px; }
+.auth__title { font-size: var(--fs-24); font-weight: 600; letter-spacing: -0.03em; }
+.auth__sub { margin-top: var(--sp-6); font-size: var(--fs-13); color: var(--fg-muted); }
+.auth .form, .auth .alert { margin-top: var(--sp-24); }
+/* Restates the shared form rhythm rather than departing from it, so the auth
+   column stays independently adjustable without reaching into .form. */
+.auth .form { gap: var(--gutter); }
+.auth .btn--primary { height: 38px; margin-top: var(--sp-4); font-size: var(--fs-14); }
+.auth__switch { margin-top: var(--sp-24); padding-top: var(--sp-18); border-top: 1px solid var(--border); font-size: var(--fs-13); color: var(--fg-muted); }
+.auth__switch .link { margin-left: var(--sp-2); }
 
 /* ─────────────────────────────── Layout ─────────────────────────────── */
 
@@ -824,26 +1187,26 @@ table, .num, .mono, .kpi__value, .kbd { font-variant-numeric: tabular-nums; }
 
 .topbar {
   grid-area: topbar;
-  display: flex; align-items: center; gap: 10px;
-  padding: 0 12px 0 16px;
+  display: flex; align-items: center; gap: var(--sp-10);
+  padding: 0 var(--sp-12) 0 var(--sp-16);
   background: color-mix(in srgb, var(--surface) 88%, transparent);
   backdrop-filter: saturate(150%) blur(8px);
   border-bottom: 1px solid var(--border);
 }
 .topbar__menu { display: none; }
-.topbar__actions { display: flex; align-items: center; gap: 2px; margin-left: auto; padding-left: 8px; }
+.topbar__actions { display: flex; align-items: center; gap: var(--sp-2); margin-left: auto; padding-left: var(--sp-8); }
 
-.crumbs { display: flex; align-items: center; gap: 7px; min-width: 0; font-size: 13px; }
+.crumbs { display: flex; align-items: center; gap: var(--sp-7); min-width: 0; font-size: var(--fs-13); }
 .crumbs__org { color: var(--fg-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .crumbs__sep { color: var(--fg-subtle); flex: none; }
 .crumbs__current { font-weight: 600; letter-spacing: -0.01em; white-space: nowrap; }
 
 .omni {
-  display: flex; align-items: center; gap: 8px;
-  width: min(320px, 30vw); height: 32px; padding: 0 8px 0 10px; margin-left: 18px;
+  display: flex; align-items: center; gap: var(--sp-8);
+  width: min(320px, 30vw); height: 32px; padding: 0 var(--sp-8) 0 var(--sp-10); margin-left: var(--sp-18);
   background: var(--sunken); color: var(--fg-subtle);
   border: 1px solid var(--border); border-radius: var(--r-md);
-  font-size: 13px;
+  font-size: var(--fs-13);
   transition: border-color var(--t-fast) var(--ease), background-color var(--t-fast) var(--ease), color var(--t-fast) var(--ease);
 }
 .omni:hover { border-color: var(--border-strong); background: var(--surface); color: var(--fg-muted); }
@@ -851,7 +1214,7 @@ table, .num, .mono, .kpi__value, .kbd { font-variant-numeric: tabular-nums; }
 .omni .kbds { flex: none; }
 
 #bell { position: relative; }
-#bell .dot { position: absolute; top: 5px; right: 5px; background: var(--brand-600); box-shadow: 0 0 0 2px var(--surface); }
+#bell .dot { position: absolute; top: var(--sp-5); right: var(--sp-5); background: var(--brand-600); box-shadow: 0 0 0 2px var(--surface); }
 
 /* Only one of the two theme glyphs shows, chosen by the active scheme. */
 .icon--moon { display: none; }
@@ -867,79 +1230,130 @@ table, .num, .mono, .kpi__value, .kbd { font-variant-numeric: tabular-nums; }
 .sidebar {
   grid-area: sidebar;
   display: flex; flex-direction: column;
-  padding: 10px 10px 8px; overflow-y: auto;
+  padding: var(--sp-10) var(--sp-10) var(--sp-8); overflow-y: auto;
   background: var(--canvas); border-right: 1px solid var(--border);
 }
 
-.sidebar__brand { display: none; align-items: center; gap: 9px; padding: 4px 6px 12px; }
+.sidebar__brand { display: none; align-items: center; gap: var(--sp-9); padding: var(--sp-4) var(--sp-6) var(--sp-12); }
 
 /* Workspace identity, not a control: there is no second tenant to switch to
    from inside a session, so it deliberately has no affordance or chevron. */
 .switcher {
-  display: flex; align-items: center; gap: 9px;
-  padding: 9px 10px; margin-bottom: 12px;
+  display: flex; align-items: center; gap: var(--sp-9);
+  padding: var(--sp-9) var(--sp-10); margin-bottom: var(--sp-12);
   background: var(--surface); border: 1px solid var(--border);
   border-radius: var(--r-lg); box-shadow: var(--sh-xs);
 }
 .switcher__text { display: grid; min-width: 0; flex: 1; }
-.switcher__name { font-size: 13px; font-weight: 600; letter-spacing: -0.01em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.switcher__meta { margin-top: 1px; font-size: 11px; color: var(--fg-muted); text-transform: capitalize; }
+.switcher__name { font-size: var(--fs-13); font-weight: 600; letter-spacing: -0.01em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.switcher__meta { margin-top: var(--sp-1); font-size: var(--fs-11); color: var(--fg-muted); text-transform: capitalize; }
 
 .nav { flex: 1; }
-.nav__group { margin-bottom: 16px; }
-.nav__label { padding: 4px 8px; font-size: 11px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; color: var(--fg-subtle); }
+.nav__group { margin-bottom: var(--sp-16); }
+.nav__label { padding: var(--sp-4) var(--sp-8); font-size: var(--fs-11); font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; color: var(--fg-subtle); }
 .nav__item {
   position: relative;
-  display: flex; align-items: center; gap: 10px;
-  width: 100%; height: 33px; padding: 0 9px;
+  display: flex; align-items: center; gap: var(--glyph-gap);
+  width: 100%; height: 33px; padding: 0 var(--sp-9);
   border-radius: var(--r-md);
-  color: var(--fg-muted); font-size: 13px; font-weight: 500;
+  color: var(--fg-muted); font-size: var(--fs-13); font-weight: 500;
   transition: background-color var(--t-fast) var(--ease), color var(--t-fast) var(--ease);
 }
 .nav__item .icon { color: var(--fg-subtle); transition: color var(--t-fast) var(--ease); }
 .nav__item:hover { background: var(--hover); color: var(--fg); }
 .nav__item:hover .icon { color: var(--fg-muted); }
 /* Active nav: brand tint plus a short inset rail. Reads at a glance without
-   the weight of a filled pill. */
+   the weight of a filled pill. The negative left offset is not spacing — it
+   cancels the sidebar's own left padding exactly, so the rail sits flush
+   against the panel edge. Written against the same token for that reason. */
 .nav__item[aria-current="page"] { background: var(--brand-subtle); color: var(--brand-fg); font-weight: 600; }
 .nav__item[aria-current="page"] .icon { color: currentColor; }
 .nav__item[aria-current="page"]::before {
-  content: ""; position: absolute; left: -10px; top: 50%; transform: translateY(-50%);
+  content: ""; position: absolute; left: calc(-1 * var(--sp-10)); top: 50%; transform: translateY(-50%);
   width: 3px; height: 18px; border-radius: 0 var(--r-full) var(--r-full) 0;
   background: var(--brand-600);
+  /* The rail draws itself when the row becomes current. route() adds the
+     attribute, which creates this pseudo-element, which plays the animation —
+     so it marks the one row that just changed and no other. Re-navigating to
+     the page you are already on sets the same attribute value, the
+     pseudo-element is never destroyed, and nothing replays: the rail does not
+     flash on a refresh.
+     scaleY from 0.4 rather than 0 keeps the mark legible in every frame; the
+     translateY has to be restated in both keyframes because a transform is one
+     property and a keyframe replaces it whole. */
+  animation: rail-in var(--t) var(--ease);
+}
+@keyframes rail-in {
+  from { transform: translateY(-50%) scaleY(0.4); }
+  to { transform: translateY(-50%) scaleY(1); }
 }
 
-.sidebar__foot { margin-top: auto; padding-top: 8px; border-top: 1px solid var(--border); }
+.sidebar__foot { margin-top: auto; padding-top: var(--sp-8); border-top: 1px solid var(--border); }
 .whoami {
-  display: flex; align-items: center; gap: 9px;
-  padding: 8px; margin-top: 6px;
+  display: flex; align-items: center; gap: var(--sp-9);
+  padding: var(--sp-8); margin-top: var(--sp-6);
   background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-md);
 }
 .whoami__text { display: grid; min-width: 0; }
-.whoami__name { font-size: 12px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.whoami__mail { font-size: 11px; color: var(--fg-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.whoami__name { font-size: var(--fs-12); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.whoami__mail { font-size: var(--fs-11); color: var(--fg-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .content { grid-area: content; overflow-y: auto; scroll-behavior: smooth; }
 .content:focus { outline: none; }
-.page { max-width: var(--max); margin: 0 auto; padding: 26px 32px 64px; }
+/* Route transition, and the skeleton-to-content transition, in one rule.
+   Every render clears #page and appends exactly one fresh element, so a keyframe
+   animation on the child plays once per insertion and cannot replay on an
+   in-place update — there is no in-place update path in app.js. view() inserts
+   twice, the placeholder and then the real page, so both fade and the hard cut
+   between them goes away without any coordination between them.
+   4px and 150ms are chosen against repeat use, not first impression: this fires
+   on every navigation in a tool people move around in all day, and anything
+   past ~200ms starts being felt as the app being slow. The rise gives the
+   direction; the fade does the work.
+   Ends on `transform: none`, so the transformed containing block that briefly
+   exists here is gone by the time anything measures it — which matters because
+   the tables inside carry position: sticky headers. */
+.content > * { animation: view-in var(--t) var(--ease); }
+@keyframes view-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+/* Top padding was 26px and is now 24px, on the 4px grid the rest of this scale
+   keeps above 12. The 2px it gives up is the cheapest possible price for the
+   page frame no longer being the one place that sits off the ladder. */
+.page { max-width: var(--max); margin: 0 auto; padding: var(--sp-24) var(--sp-32) var(--sp-64); }
 .page--narrow { max-width: 820px; }
 
-.page__head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 22px; }
-.page__title { font-size: 22px; font-weight: 600; letter-spacing: -0.028em; }
-.page__desc { margin-top: 5px; max-width: 620px; font-size: 13px; line-height: 1.55; color: var(--fg-muted); }
-.page__actions { display: flex; align-items: center; gap: 8px; flex: none; }
+.page__head { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--sp-16); margin-bottom: var(--sp-24); }
+.page__title { font-size: var(--fs-22); font-weight: 600; letter-spacing: -0.028em; }
+.page__desc { margin-top: var(--sp-5); max-width: 620px; font-size: var(--fs-13); line-height: 1.55; color: var(--fg-muted); }
+.page__actions { display: flex; align-items: center; gap: var(--sp-8); flex: none; }
 
-.stack { display: grid; gap: 16px; }
-.stack--lg { gap: 24px; }
-.split { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(300px, 0.9fr); gap: 16px; align-items: start; }
-.section__title { font-size: 15px; font-weight: 600; letter-spacing: -0.006em; }
-.section__desc { margin-top: 2px; font-size: 12px; color: var(--fg-muted); }
+.stack { display: grid; gap: var(--gutter); }
+.stack--lg { gap: var(--sp-24); }
+.split { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(300px, 0.9fr); gap: var(--gutter); align-items: start; }
+.section__title { font-size: var(--fs-15); font-weight: 600; letter-spacing: -0.006em; }
+.section__desc { margin-top: var(--sp-2); font-size: var(--fs-12); color: var(--fg-muted); }
 
-.scrim { position: fixed; inset: 0; z-index: 19; background: var(--backdrop); backdrop-filter: blur(2px); }
+/* Drawer scrim. The panel it dims already slides on a transition (see the 1024
+   block); this is the half that was missing, so the dim used to appear in one
+   frame under a panel that took 250ms to arrive.
+   It has to be an animation, not a transition: the scrim is toggled with
+   [hidden], and a transition never runs out of display: none. An animation does
+   play on first render, which is exactly when this needs to.
+   In at --t so the dim is established before the drawer finishes crossing it;
+   out at --t-slow, the one exit in the file that is not faster than its
+   entrance, because it has to leave *with* the drawer rather than before it —
+   a scrim that clears first leaves the panel floating over a lit page. */
+.scrim {
+  position: fixed; inset: 0; z-index: 19; background: var(--backdrop); backdrop-filter: blur(2px);
+  animation: scrim-in var(--t) var(--ease);
+}
+.scrim.is-closing { animation: scrim-out var(--t-slow) var(--ease) forwards; pointer-events: none; }
+@keyframes scrim-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes scrim-out { from { opacity: 1; } to { opacity: 0; } }
 
 /* ───────────────────────────── Responsive ───────────────────────────── */
 
-/* Claim panel out first: the form is the task, everything else is decoration. */
+/* 900 — auth only.
+   Claim panel out first: the form is the task, everything else is decoration. */
 @media (max-width: 900px) {
   .auth { grid-template-columns: minmax(0, 1fr); }
   .auth__aside { display: none; }
@@ -947,59 +1361,170 @@ table, .num, .mono, .kpi__value, .kbd { font-variant-numeric: tabular-nums; }
   .auth__main { align-content: center; }
 }
 
+/* 1180 — the split collapses. */
 @media (max-width: 1180px) {
   .split { grid-template-columns: 1fr; }
 }
 
+/* 1024 — tablet: the sidebar becomes a drawer. */
 @media (max-width: 1024px) {
   .shell { grid-template-columns: minmax(0, 1fr); grid-template-areas: "topbar" "content"; }
-  .topbar { padding-left: 8px; }
+  .topbar { padding-left: var(--sp-8); }
   .topbar__menu { display: inline-grid; }
 
+  /* `transform` alone moves the panel off screen but leaves it rendered, so a
+     keyboard user tabbing past the menu button walks through a dozen invisible
+     controls. `visibility: hidden` removes it from the tab order and the
+     accessibility tree without display: none, which would kill the slide.
+     Transitioning visibility is what keeps the slide intact in both directions:
+     it resolves to `visible` for the whole of any transition it takes part in
+     and only flips at the far end, so the panel is visible as it arrives and
+     stays visible until it has finished leaving. */
   .sidebar {
     position: fixed; z-index: 20; inset: 0 auto 0 0;
-    width: 280px; transform: translateX(-100%);
+    width: 280px; transform: translateX(-100%); visibility: hidden;
     background: var(--surface); box-shadow: var(--sh-xl);
-    transition: transform var(--t-slow) var(--ease);
+    transition: transform var(--t-slow) var(--ease), visibility var(--t-slow) var(--ease);
   }
   .sidebar__brand { display: flex; }
   body.nav-open { overflow: hidden; }
-  body.nav-open .sidebar { transform: none; }
+  body.nav-open .sidebar { transform: none; visibility: visible; }
 
-  .page { padding: 20px 24px 56px; }
+  .page { padding: var(--sp-20) var(--sp-24) var(--sp-56); }
   .omni { display: none; }
 }
 
+/* 720 — KPI tiles relax so three still fit. */
 @media (max-width: 720px) {
   .kpis { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
   .picker { grid-template-columns: 1fr; max-height: 46vh; }
 }
 
+/* 640 — phone. */
 @media (max-width: 640px) {
-  .page { padding: 16px 16px 48px; }
+  .page { padding: var(--sp-16) var(--sp-16) var(--sp-48); }
   .page__head { flex-direction: column; align-items: stretch; }
   .page__actions { flex-wrap: wrap; }
   .page__actions .btn { flex: 1; }
-  .page__title { font-size: 20px; }
+  .page__title { font-size: var(--fs-20); }
   .crumbs__org, .crumbs__sep { display: none; }
-  .form-row { grid-template-columns: 1fr; gap: 8px; }
-  .modal { width: min(520px, calc(100vw - 20px)); }
+  .form-row { grid-template-columns: 1fr; gap: var(--sp-8); }
+  /* Gutter halves with the page's own: at this width 16px each side would leave
+     the dialog narrower than the form inside it. */
+  .modal { width: min(520px, calc(100vw - var(--sp-20))); }
   .modal__foot { flex-direction: column-reverse; }
   .modal__foot .btn { width: 100%; }
   .sheet { width: 100vw; border-left-width: 0; }
-  .toaster { right: 8px; bottom: 8px; }
-  .table th, .table td { padding-left: 12px; padding-right: 12px; }
-  .table th { font-size: 10px; }
+  .toaster { right: var(--sp-8); bottom: var(--sp-8); }
+  .table th, .table td { padding-left: var(--sp-12); padding-right: var(--sp-12); }
+  .table th { font-size: var(--fs-10); }
   /* Below this width the identity column would be crushed to three characters.
      A dense table scrolls horizontally instead of pretending to fit, and the
      first column keeps enough room to identify the row. */
   .table { min-width: 620px; }
   .table th:first-child, .table td:first-child { min-width: 168px; }
-  .toolbar { gap: 6px; }
+  .toolbar { gap: var(--sp-6); }
   .search { max-width: none; }
-  .empty { padding: 40px 20px; }
-  .auth__main { padding: 28px 18px 40px; }
-  .auth__title { font-size: 21px; }
+  .empty { padding: var(--sp-40) var(--sp-20); }
+  .auth__main { padding: var(--sp-28) var(--sp-18) var(--sp-40); }
+  /* Was 21px; 20 is the step .page__title also drops to at this width, so the
+     two largest headings in the app now agree on a phone. */
+  .auth__title { font-size: var(--fs-20); }
   /* Row actions never hide on touch: there is no hover to bring them back. */
   .row-actions { opacity: 1; }
+}
+
+/* ─────────────────────────── Forced colours ─────────────────────────── */
+
+/* Windows High Contrast Mode and any other forced-colours context.
+ *
+ * The browser replaces every colour with a user-chosen system palette and
+ * DROPS box-shadow entirely. Three things in this stylesheet break under that,
+ * all of them load-bearing:
+ *
+ *   1. Focus. `.btn`, `.icon-btn` and the palette input set `outline: none`
+ *      and draw their ring with box-shadow, so with shadows dropped there is
+ *      no focus indicator at all — the keyboard path goes blind. Everything
+ *      else inherits the global `:focus-visible` outline and is unaffected.
+ *   2. Selected state. Active nav and the palette's keyboard cursor are drawn
+ *      with a brand tint (`--brand-subtle`) and brand ink, which both collapse
+ *      to the same Canvas/CanvasText as their neighbours. "Where am I" and
+ *      "what will Enter do" become unanswerable — worst in the palette, which
+ *      is keyboard-only by design.
+ *   3. Anything conveyed by fill alone: status badge tones collapse into one
+ *      another, and skeleton gradients vanish so loading looks like empty.
+ *
+ * This block is last in the file so it overrides components without editing
+ * them, and it is the one place below Tokens allowed to be scheme-aware.
+ * Fixes use system colour keywords rather than our own — the point of the mode
+ * is that the user's palette wins. The single `forced-color-adjust: none` below
+ * is scoped to the Highlight/HighlightText pair, which has to be applied as a
+ * matched pair to stay legible; nothing else opts out.
+ */
+@media (forced-colors: active) {
+  /* 1. Restore a real outline where the ring was a shadow. */
+  .btn:focus-visible,
+  .icon-btn:focus-visible,
+  .palette__input input:focus-visible,
+  .nav__item:focus-visible {
+    outline: 3px solid Highlight;
+    outline-offset: 2px;
+  }
+
+  /* Buttons need a visible edge: their variants are distinguished by fill,
+     which is gone, so ghost/primary/secondary would all read as bare text. */
+  .btn,
+  .icon-btn {
+    border: 1px solid ButtonText;
+  }
+  .btn[disabled] {
+    color: GrayText;
+    border-color: GrayText;
+  }
+
+  /* 2. Selected and active states use the system highlight pair, which is
+     guaranteed to contrast in the user's chosen palette. */
+  .nav__item[aria-current="page"],
+  .palette__item[aria-selected="true"] {
+    background: Highlight;
+    color: HighlightText;
+    forced-color-adjust: none; /* scoped exception: keeps the pair intact */
+  }
+  .nav__item[aria-current="page"] .icon,
+  .palette__item[aria-selected="true"] .icon {
+    color: HighlightText;
+  }
+  /* The inset rail is redundant once the row is highlighted, and a forced
+     background on a 3px pseudo-element reads as an artefact. */
+  .nav__item[aria-current="page"]::before {
+    display: none;
+  }
+
+  /* 3. Fill-only meaning gets an explicit edge. Badges keep their text, so a
+     border is enough to keep them reading as discrete chips. */
+  .badge,
+  .card,
+  .kpi,
+  .callout,
+  .alert,
+  .modal,
+  .sheet,
+  .palette,
+  .toast {
+    border: 1px solid CanvasText;
+  }
+
+  /* Skeletons: the gradient is dropped, so bound the shape instead. Keeping
+     them distinguishable from real empty content matters more than the shimmer. */
+  .skel {
+    border: 1px dashed GrayText;
+    background: Canvas;
+  }
+
+  /* Hairlines that exist only as a tint would otherwise disappear. */
+  .table th,
+  .table td,
+  .feed__item {
+    border-color: CanvasText;
+  }
 }

@@ -61,6 +61,16 @@
 
     <div id="toasts" class="toaster" aria-live="polite" aria-atomic="false"></div>
 
+    <!--
+      Route announcer. A hash change swaps #page without a document load, so no
+      assistive technology is told anything happened. This names the new view.
+      Polite, never assertive: an interruption is for something the reader must
+      act on, and arriving where they asked to arrive is not that. It is a
+      separate node from the toaster so a navigation cannot clobber a queued
+      toast, or be clobbered by one.
+    -->
+    <p class="sr-only" id="route-status" role="status"></p>
+
     <!-- ========================= AUTH ========================= -->
     <!--
       Split screen: the left column states what the product is, the right column
@@ -185,13 +195,13 @@
     <!-- ========================= APP ========================= -->
     <div id="app" class="shell" hidden>
       <header class="topbar">
-        <button class="icon-btn topbar__menu" type="button" data-nav="open" aria-label="Open navigation" aria-controls="sidebar">
+        <button class="icon-btn topbar__menu" type="button" data-nav="open" aria-label="Open navigation" aria-controls="sidebar" aria-expanded="false">
           <svg class="icon"><use href="#i-menu" /></svg>
         </button>
 
         <nav class="crumbs" aria-label="Breadcrumb">
           <span class="crumbs__org" id="crumb-org">workspace</span>
-          <svg class="icon icon--xs crumbs__sep"><use href="#i-chevron-right" /></svg>
+          <svg class="icon icon--xs crumbs__sep" aria-hidden="true"><use href="#i-chevron-right" /></svg>
           <span class="crumbs__current" id="crumb-page" aria-current="page">Overview</span>
         </nav>
 
@@ -286,11 +296,26 @@
 
     <dialog class="palette" id="palette" aria-label="Command palette">
       <div class="palette__input">
-        <svg class="icon icon--sm"><use href="#i-search" /></svg>
-        <input id="palette-query" type="text" placeholder="Type a command or search…" autocomplete="off" aria-label="Command" />
+        <svg class="icon icon--sm" aria-hidden="true"><use href="#i-search" /></svg>
+        <!--
+          Combobox pattern: DOM focus never leaves this input, so the arrow keys
+          keep reaching their handler. The active row is published with
+          aria-activedescendant instead, which is the only way a reader learns
+          what Enter would run. aria-expanded is permanently true because the
+          list is part of the dialog rather than a popup that can be collapsed.
+        -->
+        <input id="palette-query" type="text" placeholder="Type a command or search…" autocomplete="off"
+               aria-label="Command" role="combobox" aria-expanded="true"
+               aria-controls="palette-list" aria-autocomplete="list" />
         <kbd class="kbd">esc</kbd>
       </div>
       <div class="palette__list" id="palette-list" role="listbox" aria-label="Results"></div>
+      <!--
+        Outside the listbox on purpose: role="listbox" may only own options, and
+        a message nested among them corrupts the reported set size and position.
+        role="status" is what makes "No results" audible at all.
+      -->
+      <p class="palette__empty" id="palette-empty" role="status" hidden>No results</p>
       <footer class="palette__foot">
         <span><kbd class="kbd">↑</kbd><kbd class="kbd">↓</kbd> navigate</span>
         <span><kbd class="kbd">↵</kbd> select</span>
