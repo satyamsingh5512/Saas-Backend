@@ -4,16 +4,27 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/satym-in/tenant-saas-backend/pkg/txscope"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // ErrUserNotFound is returned when a user lookup yields no live row within
 // the caller's tenant scope (which, thanks to RLS, is the only scope any
 // query can ever see).
 var ErrUserNotFound = errors.New("identity: user not found")
+
+var (
+	ErrTenantInactive      = errors.New("identity: tenant inactive")
+	ErrUserInactive        = errors.New("identity: user inactive")
+	ErrRefreshInvalid      = errors.New("identity: refresh token invalid")
+	ErrRefreshReused       = errors.New("identity: refresh token reused")
+	ErrRefreshExpired      = errors.New("identity: refresh token expired")
+	ErrVerificationInvalid = errors.New("identity: verification token invalid")
+)
 
 // Repository provides tenant-scoped data access for users and their related
 // auth artifacts (refresh tokens, OAuth links, verification tokens). Every
@@ -140,6 +151,49 @@ func (r *Repository) UpdateTx(tx *gorm.DB, user *User) error {
 	return tx.Save(user).Error
 }
 
+// ValidateCredentialState re-reads the tenant and user for every protected
+// request. JWT claims and API credentials identify the subject; they do not
+// override current suspension, disablement, or soft deletion state.
+func (r *Repository) ValidateCredentialState(ctx context.Context, tenantID, userID uuid.UUID) error {
+	return txscope.WithTenantTxID(ctx, r.db, tenantID, func(tx *gorm.DB) error {
+		_, err := r.activeCredentialUserTx(tx, tenantID, userID, false)
+		return err
+	})
+}
+
+func (r *Repository) activeCredentialUserTx(tx *gorm.DB, tenantID, userID uuid.UUID, lock bool) (*User, error) {
+	var tenant struct {
+		Status    string
+		DeletedAt *time.Time
+	}
+	tenantQuery := tx.Table("tenants").Select("status, deleted_at").Where("id = ?", tenantID)
+	if lock {
+		tenantQuery = tenantQuery.Clauses(clause.Locking{Strength: "SHARE"})
+	}
+	if err := tenantQuery.Scan(&tenant).Error; err != nil {
+		return nil, err
+	}
+	if tenant.Status != "active" || tenant.DeletedAt != nil {
+		return nil, ErrTenantInactive
+	}
+
+	query := tx.Where("id = ? AND deleted_at IS NULL", userID)
+	if lock {
+		query = query.Clauses(clause.Locking{Strength: "UPDATE"})
+	}
+	var user User
+	if err := query.First(&user).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrUserInactive
+		}
+		return nil, err
+	}
+	if user.Status == StatusDisabled {
+		return nil, ErrUserInactive
+	}
+	return &user, nil
+}
+
 // --- Refresh tokens ---
 
 // CreateRefreshToken inserts a new refresh token row within the given
@@ -188,13 +242,66 @@ func (r *Repository) RevokeRefreshTokenFamily(ctx context.Context, tenantID, fam
 	})
 }
 
-// MarkRefreshTokenReplaced marks oldID as rotated-out in favor of newID.
-func (r *Repository) MarkRefreshTokenReplaced(ctx context.Context, tenantID, oldID, newID uuid.UUID) error {
-	return txscope.WithTenantTxID(ctx, r.db, tenantID, func(tx *gorm.DB) error {
-		return tx.Model(&RefreshToken{}).
-			Where("id = ?", oldID).
-			Updates(map[string]any{"revoked_at": gorm.Expr("now()"), "replaced_by": newID}).Error
+// RotateRefreshToken locks and consumes the old token, validates current
+// tenant/user state, and inserts its replacement in one transaction. Concurrent
+// uses can therefore create at most one descendant.
+func (r *Repository) RotateRefreshToken(ctx context.Context, tenantID, oldID uuid.UUID, replacement *RefreshToken) (*User, error) {
+	var (
+		user    *User
+		outcome error
+	)
+	err := txscope.WithTenantTxID(ctx, r.db, tenantID, func(tx *gorm.DB) error {
+		activeUser, err := r.activeCredentialUserTx(tx, tenantID, replacement.UserID, true)
+		if err != nil {
+			outcome = err
+			return nil
+		}
+
+		var current RefreshToken
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ?", oldID).First(&current).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				outcome = ErrRefreshInvalid
+				return nil
+			}
+			return err
+		}
+		if current.RevokedAt != nil || current.ReplacedBy != nil {
+			if err := tx.Model(&RefreshToken{}).
+				Where("family_id = ? AND revoked_at IS NULL", current.FamilyID).
+				Update("revoked_at", gorm.Expr("now()")).Error; err != nil {
+				return err
+			}
+			outcome = ErrRefreshReused
+			return nil
+		}
+		if !time.Now().Before(current.ExpiresAt) {
+			outcome = ErrRefreshExpired
+			return nil
+		}
+		if replacement.TenantID != current.TenantID || replacement.UserID != current.UserID || replacement.FamilyID != current.FamilyID {
+			return ErrRefreshInvalid
+		}
+		if err := tx.Create(replacement).Error; err != nil {
+			return err
+		}
+		result := tx.Model(&RefreshToken{}).Where("id = ? AND revoked_at IS NULL AND replaced_by IS NULL", current.ID).
+			Updates(map[string]any{"revoked_at": gorm.Expr("now()"), "replaced_by": replacement.ID})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return ErrRefreshInvalid
+		}
+		user = activeUser
+		return nil
 	})
+	if err != nil {
+		return nil, err
+	}
+	if outcome != nil {
+		return nil, outcome
+	}
+	return user, nil
 }
 
 // --- OAuth accounts ---
@@ -253,10 +360,69 @@ func (r *Repository) FindVerificationTokenByHash(ctx context.Context, tokenHash 
 	return &vt, nil
 }
 
-// MarkVerificationTokenUsed marks a verification token as consumed so it
-// cannot be replayed.
-func (r *Repository) MarkVerificationTokenUsed(ctx context.Context, tenantID, id uuid.UUID) error {
+// ConsumePasswordReset claims a single-use token, updates the password, and
+// revokes every refresh session atomically.
+func (r *Repository) ConsumePasswordReset(ctx context.Context, tenantID, tokenID, userID uuid.UUID, passwordHash string) error {
 	return txscope.WithTenantTxID(ctx, r.db, tenantID, func(tx *gorm.DB) error {
-		return tx.Model(&VerificationToken{}).Where("id = ?", id).Update("used_at", gorm.Expr("now()")).Error
+		if _, err := r.activeCredentialUserTx(tx, tenantID, userID, true); err != nil {
+			return err
+		}
+		if err := r.claimVerificationTokenTx(tx, tokenID, userID, PurposePasswordReset); err != nil {
+			return err
+		}
+		result := tx.Model(&User{}).Where("id = ? AND deleted_at IS NULL", userID).
+			Updates(map[string]any{"password_hash": passwordHash, "updated_at": gorm.Expr("now()")})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return ErrVerificationInvalid
+		}
+		return tx.Model(&RefreshToken{}).Where("user_id = ? AND revoked_at IS NULL", userID).
+			Update("revoked_at", gorm.Expr("now()")).Error
 	})
+}
+
+// ConsumeEmailVerification claims the token and marks the user verified in the
+// same transaction, so two concurrent callbacks cannot both succeed.
+func (r *Repository) ConsumeEmailVerification(ctx context.Context, tenantID, tokenID, userID uuid.UUID) error {
+	return txscope.WithTenantTxID(ctx, r.db, tenantID, func(tx *gorm.DB) error {
+		if _, err := r.activeCredentialUserTx(tx, tenantID, userID, true); err != nil {
+			return err
+		}
+		if err := r.claimVerificationTokenTx(tx, tokenID, userID, PurposeEmailVerification); err != nil {
+			return err
+		}
+		result := tx.Model(&User{}).Where("id = ? AND deleted_at IS NULL", userID).
+			Updates(map[string]any{"email_verified_at": gorm.Expr("now()"), "updated_at": gorm.Expr("now()")})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return ErrVerificationInvalid
+		}
+		return nil
+	})
+}
+
+func (r *Repository) claimVerificationTokenTx(tx *gorm.DB, tokenID, userID uuid.UUID, purpose string) error {
+	var token VerificationToken
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ?", tokenID).First(&token).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return ErrVerificationInvalid
+		}
+		return err
+	}
+	if token.UserID != userID || token.Purpose != purpose || token.UsedAt != nil || !time.Now().Before(token.ExpiresAt) {
+		return ErrVerificationInvalid
+	}
+	result := tx.Model(&VerificationToken{}).Where("id = ? AND used_at IS NULL", tokenID).
+		Update("used_at", gorm.Expr("now()"))
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected != 1 {
+		return ErrVerificationInvalid
+	}
+	return nil
 }
