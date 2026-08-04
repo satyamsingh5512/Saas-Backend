@@ -2,12 +2,16 @@ package authz
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"sort"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/satym-in/tenant-saas-backend/pkg/apperror"
 	"github.com/satym-in/tenant-saas-backend/pkg/txscope"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // PermissionCache is the minimal surface Service needs from the Redis-backed
@@ -124,35 +128,178 @@ func (s *Service) ListPermissionCatalog(ctx context.Context) ([]Permission, erro
 	return s.repo.ListPermissions(ctx)
 }
 
-// CreateRole creates a new custom role with the given permission codes.
-func (s *Service) CreateRole(ctx context.Context, tenantID uuid.UUID, name, description string, permissionCodes []string) (*Role, error) {
+// CreateRole creates a custom role only from permissions the actor currently
+// possesses. Custom roles are deliberately lowest-ranked and can never carry
+// org:manage, which remains exclusive to the seeded Owner role.
+func (s *Service) CreateRole(ctx context.Context, tenantID, actorID uuid.UUID, name, description string, permissionCodes []string) (*Role, error) {
+	codes := uniquePermissionCodes(permissionCodes)
 	role := &Role{
-		ID:          uuid.New(),
-		TenantID:    tenantID,
-		Name:        name,
-		Slug:        slugify(name),
-		Description: description,
-		IsSystem:    false,
-		Rank:        100,
-	}
-	if err := s.repo.CreateRole(ctx, role); err != nil {
-		return nil, apperror.Wrap(apperror.CodeInternal, "failed to create role", err)
+		ID: uuid.New(), TenantID: tenantID, Name: name, Slug: slugify(name),
+		Description: description, IsSystem: false, Rank: 100,
 	}
 
-	if len(permissionCodes) > 0 {
-		perms, err := s.repo.FindPermissionsByCodes(ctx, permissionCodes)
+	err := s.repo.withTenantTx(ctx, func(tx *gorm.DB) error {
+		actor, err := s.repo.actorAccessTx(tx, actorID)
 		if err != nil {
-			return nil, apperror.Wrap(apperror.CodeInternal, "failed to resolve permissions", err)
+			return err
 		}
-		ids := make([]uuid.UUID, 0, len(perms))
-		for _, p := range perms {
-			ids = append(ids, p.ID)
+		if !actor.IsOwner && role.Rank <= actor.Rank {
+			return apperror.New(apperror.CodeForbidden, "cannot create a role at or above your rank")
 		}
-		if err := s.repo.SetRolePermissions(ctx, tenantID, role.ID, ids); err != nil {
-			return nil, apperror.Wrap(apperror.CodeInternal, "failed to set role permissions", err)
+		permissions, err := s.repo.permissionsByCodesTx(tx, codes)
+		if err != nil {
+			return err
 		}
+		for _, permission := range permissions {
+			if permission.Code == PermOrgManage {
+				return apperror.New(apperror.CodeForbidden, "org:manage is exclusive to the Owner role")
+			}
+			if _, ok := actor.Permissions[permission.Code]; !ok {
+				return apperror.New(apperror.CodeForbidden, "cannot delegate a permission you do not possess")
+			}
+		}
+		if err := tx.Create(role).Error; err != nil {
+			return err
+		}
+		return setRolePermissionsTx(tx, tenantID, role.ID, permissions)
+	})
+	if err != nil {
+		return nil, roleMutationError("failed to create role", err)
 	}
 	return role, nil
+}
+
+func uniquePermissionCodes(codes []string) []string {
+	seen := make(map[string]struct{}, len(codes))
+	out := make([]string, 0, len(codes))
+	for _, code := range codes {
+		if _, ok := seen[code]; ok {
+			continue
+		}
+		seen[code] = struct{}{}
+		out = append(out, code)
+	}
+	return out
+}
+
+func setRolePermissionsTx(tx *gorm.DB, tenantID, roleID uuid.UUID, permissions []Permission) error {
+	if err := tx.Delete(&RolePermission{}, "role_id = ?", roleID).Error; err != nil {
+		return err
+	}
+	if len(permissions) == 0 {
+		return nil
+	}
+	rows := make([]RolePermission, 0, len(permissions))
+	for _, permission := range permissions {
+		rows = append(rows, RolePermission{RoleID: roleID, PermissionID: permission.ID, TenantID: tenantID})
+	}
+	return tx.Create(&rows).Error
+}
+
+func roleMutationError(message string, err error) error {
+	if appErr, ok := apperror.As(err); ok {
+		return appErr
+	}
+	switch {
+	case errors.Is(err, ErrRoleNotFound):
+		return apperror.New(apperror.CodeNotFound, "role not found")
+	case errors.Is(err, ErrUserNotFound):
+		return apperror.New(apperror.CodeNotFound, "user not found")
+	case errors.Is(err, ErrUnknownPermissionCode):
+		return apperror.New(apperror.CodeValidation, "one or more permission codes are unknown")
+	case errors.Is(err, ErrStaleRoleRevision):
+		return apperror.New(apperror.CodeConflict, "role permissions changed since they were loaded")
+	case errors.Is(err, ErrRoleAssignmentMissing):
+		return apperror.New(apperror.CodeConflict, "role is not assigned to that user")
+	default:
+		return apperror.Wrap(apperror.CodeInternal, message, err)
+	}
+}
+
+func authorizeRoleDelegation(actor *actorAccess, role *Role, codes []string) error {
+	if role.Slug == RoleOwner && !actor.IsOwner {
+		return apperror.New(apperror.CodeForbidden, "only an Owner can manage the Owner role")
+	}
+	if !actor.IsOwner && role.Rank <= actor.Rank {
+		return apperror.New(apperror.CodeForbidden, "cannot manage a role at or above your rank")
+	}
+	for _, code := range codes {
+		if code == PermOrgManage && role.Slug != RoleOwner {
+			return apperror.New(apperror.CodeForbidden, "org:manage is exclusive to the Owner role")
+		}
+		if _, ok := actor.Permissions[code]; !ok {
+			return apperror.New(apperror.CodeForbidden, "cannot delegate a permission you do not possess")
+		}
+	}
+	return nil
+}
+
+func authorizeRoleControl(actor *actorAccess, role *Role, codes []string) error {
+	if role.Slug == RoleOwner && !actor.IsOwner {
+		return apperror.New(apperror.CodeForbidden, "only an Owner can manage the Owner role")
+	}
+	if !actor.IsOwner && role.Rank <= actor.Rank {
+		return apperror.New(apperror.CodeForbidden, "cannot manage a role at or above your rank")
+	}
+	for _, code := range codes {
+		if code == PermOrgManage && !actor.IsOwner {
+			return apperror.New(apperror.CodeForbidden, "only an Owner can manage org:manage")
+		}
+		if _, ok := actor.Permissions[code]; !ok {
+			return apperror.New(apperror.CodeForbidden, "cannot manage permissions you do not possess")
+		}
+	}
+	return nil
+}
+
+// CanDelegateRole is used by invitations before persisting a role selection.
+func (s *Service) CanDelegateRole(ctx context.Context, tenantID, actorID, roleID uuid.UUID) error {
+	err := s.repo.withTenantTx(ctx, func(tx *gorm.DB) error {
+		actor, err := s.repo.actorAccessTx(tx, actorID)
+		if err != nil {
+			return err
+		}
+		role, err := s.repo.roleForUpdateTx(tx, roleID)
+		if err != nil {
+			return err
+		}
+		codes, err := s.repo.rolePermissionCodesTx(tx, roleID)
+		if err != nil {
+			return err
+		}
+		return authorizeRoleDelegation(actor, role, codes)
+	})
+	if err != nil {
+		return roleMutationError("failed to authorize role delegation", err)
+	}
+	return nil
+}
+
+// RolePermissions is the authoritative editable state for one tenant role.
+// Revision is derived from roles.updated_at and can be supplied on a later PUT
+// to prevent one administrator from overwriting another administrator's edit.
+type RolePermissions struct {
+	RoleID          uuid.UUID `json:"role_id"`
+	PermissionCodes []string  `json:"permission_codes"`
+	Revision        string    `json:"revision"`
+}
+
+func roleRevision(updatedAt time.Time) string {
+	return updatedAt.UTC().Format(time.RFC3339Nano)
+}
+
+// GetRolePermissions returns one tenant-scoped role's current grants.
+func (s *Service) GetRolePermissions(ctx context.Context, roleID uuid.UUID) (*RolePermissions, error) {
+	role, codes, err := s.repo.RolePermissionCodes(ctx, roleID)
+	if err != nil {
+		if errors.Is(err, ErrRoleNotFound) {
+			return nil, apperror.New(apperror.CodeNotFound, "role not found")
+		}
+		return nil, apperror.Wrap(apperror.CodeInternal, "failed to load role permissions", err)
+	}
+	return &RolePermissions{
+		RoleID: role.ID, PermissionCodes: codes, Revision: roleRevision(role.UpdatedAt),
+	}, nil
 }
 
 // UpdateRolePermissions replaces a role's permission set. System roles CAN
@@ -161,56 +308,186 @@ func (s *Service) CreateRole(ctx context.Context, tenantID uuid.UUID, name, desc
 // exposing this narrow update, never a generic "update role" that could
 // rename a system role's slug out from under code that matches on it
 // (e.g. RoleOwner-gated org-deletion checks).
-func (s *Service) UpdateRolePermissions(ctx context.Context, tenantID, roleID uuid.UUID, permissionCodes []string) error {
-	perms, err := s.repo.FindPermissionsByCodes(ctx, permissionCodes)
+func (s *Service) UpdateRolePermissions(
+	ctx context.Context,
+	tenantID, actorID, roleID uuid.UUID,
+	permissionCodes []string,
+	expectedRevision *time.Time,
+) (*RolePermissions, error) {
+	codes := uniquePermissionCodes(permissionCodes)
+	var role Role
+	err := s.repo.withTenantTx(ctx, func(tx *gorm.DB) error {
+		actor, err := s.repo.actorAccessTx(tx, actorID)
+		if err != nil {
+			return err
+		}
+		lockedRole, err := s.repo.roleForUpdateTx(tx, roleID)
+		if err != nil {
+			return err
+		}
+		role = *lockedRole
+		if expectedRevision != nil && !role.UpdatedAt.Equal(*expectedRevision) {
+			return ErrStaleRoleRevision
+		}
+		permissions, err := s.repo.permissionsByCodesTx(tx, codes)
+		if err != nil {
+			return err
+		}
+		if err := authorizeRoleDelegation(actor, &role, codes); err != nil {
+			return err
+		}
+		if role.Slug == RoleOwner {
+			hasOrgManage := false
+			for _, code := range codes {
+				if code == PermOrgManage {
+					hasOrgManage = true
+					break
+				}
+			}
+			if !hasOrgManage {
+				return apperror.New(apperror.CodeForbidden, "the Owner role must retain org:manage")
+			}
+		}
+		if err := setRolePermissionsTx(tx, tenantID, roleID, permissions); err != nil {
+			return err
+		}
+		if err := tx.Model(&Role{}).Where("id = ?", roleID).
+			UpdateColumn("updated_at", gorm.Expr("updated_at")).Error; err != nil {
+			return err
+		}
+		return tx.Where("id = ?", roleID).First(&role).Error
+	})
 	if err != nil {
-		return apperror.Wrap(apperror.CodeInternal, "failed to resolve permissions", err)
+		return nil, roleMutationError("failed to update role permissions", err)
 	}
-	ids := make([]uuid.UUID, 0, len(perms))
-	for _, p := range perms {
-		ids = append(ids, p.ID)
-	}
-	if err := s.repo.SetRolePermissions(ctx, tenantID, roleID, ids); err != nil {
-		return apperror.Wrap(apperror.CodeInternal, "failed to update role permissions", err)
+	sort.Strings(codes)
+	return &RolePermissions{RoleID: role.ID, PermissionCodes: codes, Revision: roleRevision(role.UpdatedAt)}, nil
+}
+
+// DeleteRole removes only a lower-ranked custom role. The role row is locked
+// while the actor's current authority is checked.
+func (s *Service) DeleteRole(ctx context.Context, actorID, roleID uuid.UUID) error {
+	err := s.repo.withTenantTx(ctx, func(tx *gorm.DB) error {
+		actor, err := s.repo.actorAccessTx(tx, actorID)
+		if err != nil {
+			return err
+		}
+		role, err := s.repo.roleForUpdateTx(tx, roleID)
+		if err != nil {
+			return err
+		}
+		if role.IsSystem {
+			return apperror.New(apperror.CodeForbidden, "system roles cannot be deleted")
+		}
+		codes, err := s.repo.rolePermissionCodesTx(tx, roleID)
+		if err != nil {
+			return err
+		}
+		if err := authorizeRoleControl(actor, role, codes); err != nil {
+			return err
+		}
+		return tx.Delete(&Role{}, "id = ?", roleID).Error
+	})
+	if err != nil {
+		return roleMutationError("failed to delete role", err)
 	}
 	return nil
 }
 
-// DeleteRole removes a custom role. Returns an error if the role is a
-// system role (Owner/Admin/Manager/Member/Guest), which must never be
-// deletable since core authorization flows and the registration flow
-// assume they always exist.
-func (s *Service) DeleteRole(ctx context.Context, roleID uuid.UUID) error {
-	roles, err := s.repo.ListRoles(ctx)
-	if err != nil {
-		return err
-	}
-	for _, r := range roles {
-		if r.ID == roleID && r.IsSystem {
-			return apperror.New(apperror.CodeForbidden, "system roles cannot be deleted")
+// AssignRole grants a role only when the actor may delegate that role's rank
+// and complete permission set. Peer/higher-ranked users cannot be modified by
+// non-Owners even when the specific role being added is lower-ranked.
+func (s *Service) AssignRole(ctx context.Context, tenantID, userID, roleID, assignedBy uuid.UUID) error {
+	err := s.repo.withTenantTx(ctx, func(tx *gorm.DB) error {
+		actor, err := s.repo.actorAccessTx(tx, assignedBy)
+		if err != nil {
+			return err
 		}
-	}
-	return s.repo.DeleteRole(ctx, roleID)
-}
-
-// AssignRole grants a role to a user and invalidates their permission
-// cache so the change takes effect on their very next request rather than
-// waiting for cache TTL expiry.
-func (s *Service) AssignRole(ctx context.Context, tenantID, userID, roleID uuid.UUID, assignedBy uuid.UUID) error {
-	err := s.repo.AssignRole(ctx, &UserRole{
-		UserID: userID, RoleID: roleID, TenantID: tenantID, AssignedBy: &assignedBy,
+		role, err := s.repo.roleForUpdateTx(tx, roleID)
+		if err != nil {
+			return err
+		}
+		codes, err := s.repo.rolePermissionCodesTx(tx, roleID)
+		if err != nil {
+			return err
+		}
+		if err := authorizeRoleDelegation(actor, role, codes); err != nil {
+			return err
+		}
+		exists, err := s.repo.userExistsTx(tx, userID)
+		if err != nil {
+			return err
+		}
+		if !exists {
+			return ErrUserNotFound
+		}
+		if rank, hasRole, err := s.repo.highestRoleRankTx(tx, userID); err != nil {
+			return err
+		} else if hasRole && !actor.IsOwner && rank <= actor.Rank {
+			return apperror.New(apperror.CodeForbidden, "cannot modify a user at or above your rank")
+		}
+		return tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&UserRole{
+			UserID: userID, RoleID: roleID, TenantID: tenantID, AssignedBy: &assignedBy,
+		}).Error
 	})
 	if err != nil {
-		return apperror.Wrap(apperror.CodeInternal, "failed to assign role", err)
+		return roleMutationError("failed to assign role", err)
 	}
 	s.InvalidateCache(ctx, tenantID, userID)
 	return nil
 }
 
-// RevokeRole removes a role grant and invalidates the user's permission cache.
-func (s *Service) RevokeRole(ctx context.Context, tenantID, userID, roleID uuid.UUID) error {
-	if err := s.repo.RevokeRole(ctx, userID, roleID); err != nil {
-		return apperror.Wrap(apperror.CodeInternal, "failed to revoke role", err)
+// RevokeRole enforces the same delegation boundary as assignment and locks the
+// Owner role before counting grants, serializing concurrent last-Owner checks.
+func (s *Service) RevokeRole(ctx context.Context, tenantID, actorID, userID, roleID uuid.UUID) error {
+	err := s.repo.withTenantTx(ctx, func(tx *gorm.DB) error {
+		actor, err := s.repo.actorAccessTx(tx, actorID)
+		if err != nil {
+			return err
+		}
+		role, err := s.repo.roleForUpdateTx(tx, roleID)
+		if err != nil {
+			return err
+		}
+		codes, err := s.repo.rolePermissionCodesTx(tx, roleID)
+		if err != nil {
+			return err
+		}
+		if err := authorizeRoleControl(actor, role, codes); err != nil {
+			return err
+		}
+		exists, err := s.repo.userExistsTx(tx, userID)
+		if err != nil {
+			return err
+		}
+		if !exists {
+			return ErrUserNotFound
+		}
+		if rank, hasRole, err := s.repo.highestRoleRankTx(tx, userID); err != nil {
+			return err
+		} else if hasRole && !actor.IsOwner && rank <= actor.Rank {
+			return apperror.New(apperror.CodeForbidden, "cannot modify a user at or above your rank")
+		}
+		result := tx.Delete(&UserRole{}, "user_id = ? AND role_id = ?", userID, roleID)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return ErrRoleAssignmentMissing
+		}
+		if role.Slug == RoleOwner {
+			count, err := s.repo.ownerCountTx(tx)
+			if err != nil {
+				return err
+			}
+			if count == 0 {
+				return apperror.New(apperror.CodeConflict, "the organization must retain at least one Owner")
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return roleMutationError("failed to revoke role", err)
 	}
 	s.InvalidateCache(ctx, tenantID, userID)
 	return nil
