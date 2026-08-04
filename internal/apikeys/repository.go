@@ -13,6 +13,7 @@ import (
 
 // ErrNotFound indicates no matching key in the caller's tenant.
 var ErrNotFound = errors.New("apikeys: key not found")
+var ErrCredentialInactive = errors.New("apikeys: credential subject inactive")
 
 // Repository provides data access for API keys.
 type Repository struct {
@@ -115,5 +116,33 @@ func (r *Repository) FindByHash(ctx context.Context, keyHash string) (*Key, erro
 func (r *Repository) TouchLastUsed(ctx context.Context, tenantID, keyID uuid.UUID) error {
 	return txscope.WithTenantTxID(ctx, r.db, tenantID, func(tx *gorm.DB) error {
 		return tx.Model(&Key{}).Where("id = ?", keyID).Update("last_used_at", time.Now()).Error
+	})
+}
+
+// ValidateCredentialState authoritatively checks the tenant and, when present,
+// the key's owning user after the key itself has established tenant identity.
+func (r *Repository) ValidateCredentialState(ctx context.Context, tenantID uuid.UUID, userID *uuid.UUID) error {
+	return txscope.WithTenantTxID(ctx, r.db, tenantID, func(tx *gorm.DB) error {
+		var tenant struct {
+			Status    string
+			DeletedAt *time.Time
+		}
+		if err := tx.Table("tenants").Select("status, deleted_at").Where("id = ?", tenantID).Scan(&tenant).Error; err != nil {
+			return err
+		}
+		if tenant.Status != "active" || tenant.DeletedAt != nil {
+			return ErrCredentialInactive
+		}
+		if userID == nil {
+			return nil
+		}
+		var count int64
+		if err := tx.Table("users").Where("id = ? AND deleted_at IS NULL AND status <> ?", *userID, "disabled").Count(&count).Error; err != nil {
+			return err
+		}
+		if count != 1 {
+			return ErrCredentialInactive
+		}
+		return nil
 	})
 }
