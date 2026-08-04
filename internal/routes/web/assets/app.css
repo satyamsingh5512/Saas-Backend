@@ -68,6 +68,23 @@
   --active: var(--n-200);
   --fill: var(--n-100);
 
+  /* Two surfaces that only diverge from --surface in dark, and must therefore
+     be tokens rather than scheme-aware component rules (see the theming note at
+     the top of the file):
+
+       --chrome    the app frame — topbar and any bar that should read as the
+                   window rather than as content. In light it IS --surface; in
+                   dark the frame sits *below* the content plane, which is the
+                   inversion that makes a dark UI legible.
+       --control   the resting fill of an interactive box (button, input) that
+                   sits on a card. In light, paper-on-paper works because the
+                   border carries the edge. In dark, a control painted
+                   --surface on a --surface card disappears, so it steps up.
+
+     Light keeps both pointed at --surface, so nothing changes there. */
+  --chrome: var(--surface);
+  --control: var(--surface);
+
   /* Ink ladder. Measured against --surface, and against --canvas/--sunken/--fill
      where each is actually used; both schemes hold. Do not lighten any of these
      without re-measuring — --fg-subtle previously pointed at --n-400, which is
@@ -264,6 +281,25 @@
   --ring-err: 0 0 0 3px color-mix(in srgb, var(--err-solid) 20%, transparent);
   --backdrop: color-mix(in srgb, var(--n-900) 45%, transparent);
 
+  /* Two elevation channels that only exist in dark, declared here as no-op
+     shadows so every component can list them unconditionally.
+
+     Why they are needed: a drop shadow is light being blocked. On a #000 canvas
+     there is no light left to block, so --sh-* collapses to nothing and a card
+     loses its lift entirely. Dark UIs get lift from the opposite direction — a
+     1px inner highlight along the top edge, reading as a surface catching light
+     from above. --edge is that highlight.
+
+     --glow is the same trick for the one element that should read as emissive:
+     the primary action. It is a wide, very low-alpha brand halo, not a neon
+     outline; if you can see where it ends, it is too strong.
+
+     Both are `0 0 transparent` in light — a valid shadow that paints nothing —
+     so `box-shadow: var(--edge), var(--sh-xs)` is correct in both schemes and no
+     component below needs to know which scheme it is in. */
+  --edge: 0 0 rgb(0 0 0 / 0);
+  --glow: 0 0 rgb(0 0 0 / 0);
+
   /* Motion — fast, ease-out, user-initiated only.
 
      Three tokens, and every animation in the file picks one; there is no
@@ -302,8 +338,10 @@
   --t-slow: 250ms;
 
   /* The auth art panel is dark in both schemes, so it cannot read from the
-     ramp — `--n-900` is near-white once the ramp is re-pointed for dark. */
-  --art-ink: #0d1326;
+     ramp — `--n-900` is near-white once the ramp is re-pointed for dark. It is
+     true black rather than a tinted navy: the brand radials painted over it are
+     the only colour on that panel, and any base tint mutes them. */
+  --art-ink: #000000;
 
   /* Layout */
   --sidebar: 252px;
@@ -348,58 +386,114 @@
   :root:not(.theme-light) {
     color-scheme: dark;
 
-    --n-0: #131a2a;
-    --n-50: #0b1020;
-    --n-100: #1b2438;
-    --n-200: #26314a;
-    --n-300: #3a4761;
-    --n-400: #64748b;
-    --n-500: #7e8ca6;
-    --n-600: #9fadc4;
-    --n-700: #cdd6e4;
-    --n-800: #e3e9f2;
-    --n-900: #f2f6fc;
+    /* Pitch black, and neutral by construction: every step below is a grey with
+       R=G=B. The previous ramp was a cool navy (#0b1020 canvas, #131a2a paper),
+       which reads as "a dark theme" rather than as depth — a tinted dark surface
+       competes with the accent for the eye, so the accent has to shout to win.
+       On true black it can whisper.
 
-    --elevated: #1a2233;
+       Elevation, not lightness, still orders the ramp, and in dark the two run
+       in the same direction: n-50 is the canvas at absolute black, n-0 is the
+       card plane floating above it, and each interactive step is a further
+       increment of light. The 23-unit gap between the canvas (#000) and the card
+       (#171717) is the largest in the ramp on purpose — it is the only edge in
+       the UI that must be readable with no border at all.
+
+       Steps 100–300 are deliberately close together (#232323 → #363636). They
+       are hover, active/border, and strong-border: on black, 4–15 units of grey
+       is already a legible change, and wider steps turn every hover into a flash
+       and every hairline into a drawn box. Do not "fix" them by spreading them
+       out; the tightness is what makes the surface feel expensive rather than
+       wireframed. */
+    --n-0: #171717;
+    --n-50: #000000;
+    --n-100: #232323;
+    --n-200: #272727;
+    --n-300: #363636;
+    --n-400: #5e5e5e;
+    --n-500: #8f8f8f;
+    --n-600: #b4b4b4;
+    --n-700: #d4d4d4;
+    --n-800: #ebebeb;
+    --n-900: #f7f7f7;
+
+    /* Overlays float above the card plane, so they step up from it, not down.
+       The frame does the opposite: --chrome is below the canvas so the topbar
+       recedes and the content plane is the brightest thing on screen. */
+    --elevated: #1c1c1c;
+    --chrome: #090909;
+    --control: #1c1c1c;
+
     --brand-fg: var(--brand-300);
 
-    --ok-fg: #4ade80;
+    /* Status ink is lifted for a dark background. These are also the only place
+       a hue other than the brand is allowed to appear. */
+    --ok-fg: #3ddc84;
     --warn-fg: #fbbf24;
-    --err-fg: #f87171;
+    --err-fg: #ff6166;
     --info-fg: #60a5fa;
     --err-solid: #e5484d;
 
     --sh-rgb: 0 0 0;
-    --backdrop: rgb(3 6 15 / 0.62);
+    --backdrop: rgb(0 0 0 / 0.72);
+
+    /* See the --edge/--glow note in Tokens. The alphas are low by design: 0.05
+       of white on #171717 is roughly a 4-unit lift, which is a visible edge and
+       an invisible line. The glow's two layers do different jobs — a 1px white
+       rim that keeps the button's silhouette crisp against black, and a soft
+       brand halo below it that makes it read as the light source. */
+    --edge: inset 0 1px 0 rgb(255 255 255 / 0.05);
+    --glow: 0 0 0 1px rgb(255 255 255 / 0.06),
+      0 6px 22px -8px color-mix(in srgb, var(--brand-500) 65%, transparent);
+
+    /* The shimmer cannot be built from --n-100/--n-200 here. Those steps are 4
+       units apart in dark (see the ramp note), which is right for a hover but
+       leaves a skeleton visibly static — the sweep has to read as motion from
+       across the room. Widened to a 18-unit span that still sits below the card
+       plane, so a loading row reads as an absence rather than as content. */
+    --skeleton: linear-gradient(90deg, #1c1c1c 25%, #2e2e2e 50%, #1c1c1c 75%);
   }
 }
 
+/* Explicit dark override. Body identical to the media block above, per the note
+   there; TestDarkSchemeBlocksAgree asserts it, for every declaration and not
+   only the ramp. The design rationale is
+   documented once, in the media block. */
 :root.theme-dark {
   color-scheme: dark;
 
-  --n-0: #131a2a;
-  --n-50: #0b1020;
-  --n-100: #1b2438;
-  --n-200: #26314a;
-  --n-300: #3a4761;
-  --n-400: #64748b;
-  --n-500: #7e8ca6;
-  --n-600: #9fadc4;
-  --n-700: #cdd6e4;
-  --n-800: #e3e9f2;
-  --n-900: #f2f6fc;
+  --n-0: #171717;
+  --n-50: #000000;
+  --n-100: #232323;
+  --n-200: #272727;
+  --n-300: #363636;
+  --n-400: #5e5e5e;
+  --n-500: #8f8f8f;
+  --n-600: #b4b4b4;
+  --n-700: #d4d4d4;
+  --n-800: #ebebeb;
+  --n-900: #f7f7f7;
 
-  --elevated: #1a2233;
+  --elevated: #1c1c1c;
+  --chrome: #090909;
+  --control: #1c1c1c;
+
   --brand-fg: var(--brand-300);
 
-  --ok-fg: #4ade80;
+  --ok-fg: #3ddc84;
   --warn-fg: #fbbf24;
-  --err-fg: #f87171;
+  --err-fg: #ff6166;
   --info-fg: #60a5fa;
   --err-solid: #e5484d;
 
   --sh-rgb: 0 0 0;
-  --backdrop: rgb(3 6 15 / 0.62);
+  --backdrop: rgb(0 0 0 / 0.72);
+
+  --edge: inset 0 1px 0 rgb(255 255 255 / 0.05);
+  --glow: 0 0 0 1px rgb(255 255 255 / 0.06),
+    0 6px 22px -8px color-mix(in srgb, var(--brand-500) 65%, transparent);
+
+  --skeleton: linear-gradient(90deg, #1c1c1c 25%, #2e2e2e 50%, #1c1c1c 75%);
 }
 
 :root.theme-light { color-scheme: light; }
@@ -543,11 +637,13 @@ table, .num, .mono, .kpi__value, .kbd { font-variant-numeric: tabular-nums; }
 .btn[disabled] { opacity: 0.5; cursor: not-allowed; }
 .btn .icon { width: 15px; height: 15px; }
 
-.btn--primary { background: var(--brand-600); color: var(--brand-on); box-shadow: var(--sh-xs); }
+/* The primary action is the one emissive element in the UI. --glow paints
+   nothing in light, so this reads as the same flat button there. */
+.btn--primary { background: var(--brand-600); color: var(--brand-on); box-shadow: var(--sh-xs), var(--glow); }
 .btn--primary:hover:not([disabled]) { background: var(--brand-700); }
 .btn--primary:active:not([disabled]) { background: var(--brand-800); }
 
-.btn--secondary { background: var(--surface); color: var(--fg); border-color: var(--border-strong); box-shadow: var(--sh-xs); }
+.btn--secondary { background: var(--control); color: var(--fg); border-color: var(--border-strong); box-shadow: var(--edge), var(--sh-xs); }
 .btn--secondary:hover:not([disabled]) { background: var(--hover); }
 .btn--secondary:active:not([disabled]) { background: var(--active); }
 
@@ -558,7 +654,7 @@ table, .num, .mono, .kpi__value, .kbd { font-variant-numeric: tabular-nums; }
 .btn--danger:hover:not([disabled]) { filter: brightness(0.93); }
 .btn--danger:focus-visible { box-shadow: var(--ring-err); }
 
-.btn--danger-quiet { color: var(--err-fg); border-color: var(--border-strong); background: var(--surface); }
+.btn--danger-quiet { color: var(--err-fg); border-color: var(--border-strong); background: var(--control); }
 .btn--danger-quiet:hover:not([disabled]) { background: var(--err-bg); border-color: var(--err-fg); }
 
 .btn--sm { height: 28px; padding: 0 var(--sp-10); font-size: var(--fs-12); }
@@ -578,6 +674,11 @@ table, .num, .mono, .kpi__value, .kbd { font-variant-numeric: tabular-nums; }
    -7px is (44 - 30) / 2 — derived from the button's own size, so it is geometry
    rather than spacing and must not be moved onto a spacing step. */
 .icon-btn::before { content: ""; position: absolute; inset: -7px; }
+/* Adjacent controls already provide separate 30px targets. Their expanded
+   pseudo-targets would overlap at the intentionally dense 2–4px group gaps. */
+.topbar__actions .icon-btn::before,
+.row-actions .icon-btn::before,
+.sheet__actions .icon-btn::before { inset: 0; }
 .icon-btn--danger:hover { background: var(--err-bg); color: var(--err-fg); }
 
 .link {
@@ -589,7 +690,7 @@ table, .num, .mono, .kpi__value, .kbd { font-variant-numeric: tabular-nums; }
 /* Inputs — same 32px height as buttons so form rows align. */
 .input, .select, .textarea {
   display: block; width: 100%; height: 32px; padding: 0 var(--sp-10);
-  background: var(--surface); color: var(--fg);
+  background: var(--control); color: var(--fg);
   border: 1px solid var(--border-strong); border-radius: var(--r-md);
   box-shadow: var(--sh-xs);
   font-size: var(--fs-13);
@@ -602,8 +703,8 @@ table, .num, .mono, .kpi__value, .kbd { font-variant-numeric: tabular-nums; }
   border-color: var(--brand-fg); box-shadow: var(--ring);
 }
 .input[disabled] { background: var(--sunken); color: var(--fg-muted); box-shadow: none; cursor: not-allowed; }
-.input[aria-invalid="true"] { border-color: var(--err-solid); }
-.input[aria-invalid="true"]:focus { box-shadow: var(--ring-err); }
+.input[aria-invalid="true"], .select[aria-invalid="true"], .textarea[aria-invalid="true"] { border-color: var(--err-solid); }
+.input[aria-invalid="true"]:focus, .select[aria-invalid="true"]:focus, .textarea[aria-invalid="true"]:focus { box-shadow: var(--ring-err); }
 .input[type="search"]::-webkit-search-cancel-button { appearance: none; }
 
 .select {
@@ -710,6 +811,8 @@ table, .num, .mono, .kpi__value, .kbd { font-variant-numeric: tabular-nums; }
 .skel--w40 { width: 40%; }
 .skel--w60 { width: 60%; }
 .skel--w80 { width: 80%; }
+.skel--icon { width: 15px; height: 15px; flex: none; }
+.skel--action { width: auto; color: transparent; }
 @keyframes shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
 
 .spinner { width: 15px; height: 15px; animation: spin 750ms linear infinite; }
@@ -721,7 +824,7 @@ table, .num, .mono, .kpi__value, .kbd { font-variant-numeric: tabular-nums; }
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--r-lg);
-  box-shadow: var(--sh-xs);
+  box-shadow: var(--edge), var(--sh-xs);
 }
 .card__head {
   display: flex; align-items: flex-start; justify-content: space-between; gap: var(--sp-16);
@@ -747,10 +850,10 @@ table, .num, .mono, .kpi__value, .kbd { font-variant-numeric: tabular-nums; }
      pause to work out whether the difference is meaningful. */
   padding: var(--sp-16);
   background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-lg);
-  box-shadow: var(--sh-xs);
+  box-shadow: var(--edge), var(--sh-xs);
   transition: border-color var(--t) var(--ease), box-shadow var(--t) var(--ease);
 }
-.kpi:hover { border-color: var(--border-strong); box-shadow: var(--sh-sm); }
+.kpi:hover { border-color: var(--border-strong); box-shadow: var(--edge), var(--sh-sm); }
 .kpi__top { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-8); }
 .kpi__label { font-size: var(--fs-11); font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; color: var(--fg-muted); }
 /* The glyph sits in a tinted chip: it reads as metadata, not as an action. */
@@ -832,6 +935,12 @@ table, .num, .mono, .kpi__value, .kbd { font-variant-numeric: tabular-nums; }
 .empty__text { margin-top: var(--sp-5); max-width: 380px; font-size: var(--fs-13); color: var(--fg-muted); }
 .empty__actions { display: flex; gap: var(--sp-8); margin-top: var(--sp-20); }
 
+.inline-state { display: flex; align-items: flex-start; gap: var(--sp-10); padding: var(--sp-12); border: 1px solid var(--border); border-radius: var(--r-md); background: var(--sunken); }
+.inline-state > .icon { flex: none; margin-top: var(--sp-1); color: var(--err-fg); }
+.inline-state__copy { flex: 1; min-width: 0; }
+.inline-state__title { font-size: var(--fs-13); font-weight: 600; }
+.inline-state__text { margin-top: var(--sp-2); font-size: var(--fs-12); color: var(--fg-muted); }
+
 /* Toolbar above tables */
 .toolbar { display: flex; align-items: center; gap: var(--sp-8); padding: var(--sp-12) var(--sp-16); border-bottom: 1px solid var(--border); flex-wrap: wrap; }
 .search { position: relative; flex: 1; min-width: 180px; max-width: 320px; }
@@ -854,7 +963,7 @@ table, .num, .mono, .kpi__value, .kbd { font-variant-numeric: tabular-nums; }
   transition: background-color var(--t-fast) var(--ease), color var(--t-fast) var(--ease), box-shadow var(--t-fast) var(--ease);
 }
 .segment__btn:hover { color: var(--fg); }
-.segment__btn[aria-pressed="true"] { background: var(--surface); color: var(--fg); box-shadow: var(--sh-xs); }
+.segment__btn[aria-pressed="true"] { background: var(--control); color: var(--fg); box-shadow: var(--edge), var(--sh-xs); }
 
 .pager { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-12); padding: var(--sp-10) var(--sp-16); border-top: 1px solid var(--border); font-size: var(--fs-12); color: var(--fg-muted); }
 .pager__btns { display: flex; gap: var(--sp-6); }
@@ -928,6 +1037,10 @@ table, .num, .mono, .kpi__value, .kbd { font-variant-numeric: tabular-nums; }
   border-color: color-mix(in srgb, var(--ok-fg) 30%, transparent);
 }
 .callout { padding: var(--sp-12) var(--sp-14); border-radius: var(--r-md); background: var(--brand-subtle); border: 1px solid color-mix(in srgb, var(--brand-600) 22%, transparent); }
+.callout--warn { background: var(--warn-bg); border-color: color-mix(in srgb, var(--warn-fg) 30%, transparent); }
+.callout--err { background: var(--err-bg); border-color: color-mix(in srgb, var(--err-fg) 30%, transparent); }
+.callout--warn .callout__title { color: var(--warn-fg); }
+.callout--err .callout__title { color: var(--err-fg); }
 .callout__title { font-size: var(--fs-13); font-weight: 600; }
 .callout__text { margin-top: var(--sp-3); font-size: var(--fs-12); color: var(--fg-muted); }
 
@@ -951,7 +1064,7 @@ table, .num, .mono, .kpi__value, .kbd { font-variant-numeric: tabular-nums; }
 
 .modal, .sheet, .palette {
   padding: 0; border: 1px solid var(--border); color: var(--fg);
-  background: var(--elevated); box-shadow: var(--sh-xl);
+  background: var(--elevated); box-shadow: var(--edge), var(--sh-xl);
 }
 /* The backdrop fades with the dialog rather than snapping in under it. Before
    this it was the loudest cut in the app: the panel eased in over 250ms while
@@ -1048,7 +1161,7 @@ table, .num, .mono, .kpi__value, .kbd { font-variant-numeric: tabular-nums; }
 .palette[open] { animation: dialog-in var(--t-slow) var(--ease-back); }
 .palette__input { display: flex; align-items: center; gap: var(--sp-9); padding: 0 var(--sp-14); border-bottom: 1px solid var(--border); }
 .palette__input .icon { color: var(--fg-subtle); }
-.palette__input input { flex: 1; height: 48px; border: 0; background: none; font-size: var(--fs-14); }
+.palette__input input { flex: 1; min-width: 0; height: 48px; border: 0; background: none; font-size: var(--fs-14); }
 /* The dialog itself is the focused surface — it opens with focus in this field,
    and the highlighted row is the visible focus indicator. An outline around a
    borderless full-width input reads as a stray box. */
@@ -1075,7 +1188,7 @@ table, .num, .mono, .kpi__value, .kbd { font-variant-numeric: tabular-nums; }
 .toast {
   display: flex; align-items: flex-start; gap: var(--glyph-gap); padding: var(--sp-11) var(--sp-12);
   background: var(--elevated); border: 1px solid var(--border); border-radius: var(--r-lg);
-  box-shadow: var(--sh-lg); animation: toast-in var(--t-slow) var(--ease);
+  box-shadow: var(--edge), var(--sh-lg); animation: toast-in var(--t-slow) var(--ease);
   pointer-events: auto;
 }
 @keyframes toast-in { from { opacity: 0; transform: translateX(10px) scale(0.98); } to { opacity: 1; transform: none; } }
@@ -1159,10 +1272,17 @@ table, .num, .mono, .kpi__value, .kbd { font-variant-numeric: tabular-nums; }
 /* The wordmark repeats in the form column only when the claim panel is gone. */
 .auth__panel .auth__brand { display: none; margin-bottom: var(--sp-28); }
 
-.logo { display: grid; place-items: center; width: 30px; height: 30px; flex: none; border-radius: var(--r-md); background: linear-gradient(140deg, var(--brand-500), var(--brand-700)); box-shadow: var(--sh-sm); }
-/* The mark is one figure: a 12px square with a 2.5px stroke and a 3px corner.
-   Those three numbers are proportional to each other, not to the layout. */
-.logo__mark { width: 12px; height: 12px; border-radius: 3px; border: 2.5px solid #fff; }
+/* Canonical brand mark. The geometry and gradient live in one SVG asset; web,
+   favicons, social metadata and email rasterisations all derive from it. Keeping
+   the mark out of CSS prevents five subtly different versions from drifting. */
+.logo {
+  display: block;
+  width: 30px;
+  height: 30px;
+  flex: none;
+  border-radius: var(--r-md);
+  box-shadow: var(--sh-sm);
+}
 .logo__word { font-size: var(--fs-15); font-weight: 600; letter-spacing: -0.015em; }
 
 .auth__title { font-size: var(--fs-24); font-weight: 600; letter-spacing: -0.03em; }
@@ -1189,11 +1309,11 @@ table, .num, .mono, .kpi__value, .kbd { font-variant-numeric: tabular-nums; }
   grid-area: topbar;
   display: flex; align-items: center; gap: var(--sp-10);
   padding: 0 var(--sp-12) 0 var(--sp-16);
-  background: color-mix(in srgb, var(--surface) 88%, transparent);
+  background: color-mix(in srgb, var(--chrome) 88%, transparent);
   backdrop-filter: saturate(150%) blur(8px);
   border-bottom: 1px solid var(--border);
 }
-.topbar__menu { display: none; }
+.topbar__menu, .topbar__palette { display: none; }
 .topbar__actions { display: flex; align-items: center; gap: var(--sp-2); margin-left: auto; padding-left: var(--sp-8); }
 
 .crumbs { display: flex; align-items: center; gap: var(--sp-7); min-width: 0; font-size: var(--fs-13); }
@@ -1209,12 +1329,12 @@ table, .num, .mono, .kpi__value, .kbd { font-variant-numeric: tabular-nums; }
   font-size: var(--fs-13);
   transition: border-color var(--t-fast) var(--ease), background-color var(--t-fast) var(--ease), color var(--t-fast) var(--ease);
 }
-.omni:hover { border-color: var(--border-strong); background: var(--surface); color: var(--fg-muted); }
+.omni:hover { border-color: var(--border-strong); background: var(--control); color: var(--fg-muted); }
 .omni span { flex: 1; text-align: left; }
 .omni .kbds { flex: none; }
 
 #bell { position: relative; }
-#bell .dot { position: absolute; top: var(--sp-5); right: var(--sp-5); background: var(--brand-600); box-shadow: 0 0 0 2px var(--surface); }
+#bell .dot { position: absolute; top: var(--sp-5); right: var(--sp-5); background: var(--brand-600); box-shadow: 0 0 0 2px var(--chrome); }
 
 /* Only one of the two theme glyphs shows, chosen by the active scheme. */
 .icon--moon { display: none; }
@@ -1231,7 +1351,7 @@ table, .num, .mono, .kpi__value, .kbd { font-variant-numeric: tabular-nums; }
   grid-area: sidebar;
   display: flex; flex-direction: column;
   padding: var(--sp-10) var(--sp-10) var(--sp-8); overflow-y: auto;
-  background: var(--canvas); border-right: 1px solid var(--border);
+  background: var(--chrome); border-right: 1px solid var(--border);
 }
 
 .sidebar__brand { display: none; align-items: center; gap: var(--sp-9); padding: var(--sp-4) var(--sp-6) var(--sp-12); }
@@ -1242,7 +1362,7 @@ table, .num, .mono, .kpi__value, .kbd { font-variant-numeric: tabular-nums; }
   display: flex; align-items: center; gap: var(--sp-9);
   padding: var(--sp-9) var(--sp-10); margin-bottom: var(--sp-12);
   background: var(--surface); border: 1px solid var(--border);
-  border-radius: var(--r-lg); box-shadow: var(--sh-xs);
+  border-radius: var(--r-lg); box-shadow: var(--edge), var(--sh-xs);
 }
 .switcher__text { display: grid; min-width: 0; flex: 1; }
 .switcher__name { font-size: var(--fs-13); font-weight: 600; letter-spacing: -0.01em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -1370,7 +1490,7 @@ table, .num, .mono, .kpi__value, .kbd { font-variant-numeric: tabular-nums; }
 @media (max-width: 1024px) {
   .shell { grid-template-columns: minmax(0, 1fr); grid-template-areas: "topbar" "content"; }
   .topbar { padding-left: var(--sp-8); }
-  .topbar__menu { display: inline-grid; }
+  .topbar__menu, .topbar__palette { display: inline-grid; }
 
   /* `transform` alone moves the panel off screen but leaves it rendered, so a
      keyboard user tabbing past the menu button walks through a dozen invisible
