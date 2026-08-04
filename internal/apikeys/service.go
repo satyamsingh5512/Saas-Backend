@@ -167,6 +167,9 @@ func (s *Service) Authenticate(ctx context.Context, plaintext string) (*Authenti
 	if !key.Active() {
 		return nil, apperror.New(apperror.CodeUnauthorized, "invalid api key")
 	}
+	if err := s.repo.ValidateCredentialState(ctx, key.TenantID, key.UserID); err != nil {
+		return nil, apperror.New(apperror.CodeUnauthorized, "invalid api key")
+	}
 
 	// Best-effort usage telemetry; a failure here must not reject a valid request.
 	if err := s.repo.TouchLastUsed(ctx, key.TenantID, key.ID); err != nil {
