@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" role="img" aria-labelledby="title desc">
+  <title id="title">Tenancy</title>
+  <desc id="desc">A rounded square containing a smaller outlined square, representing a tenant boundary inside the platform boundary.</desc>
+  <defs>
+    <linearGradient id="tenancy-gradient" x1="8" y1="6" x2="56" y2="58" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#7B85DC"/>
+      <stop offset="1" stop-color="#4A56C0"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="15" fill="url(#tenancy-gradient)"/>
+  <rect x="19.5" y="19.5" width="25" height="25" rx="6" fill="none" stroke="#FFFFFF" stroke-width="5"/>
+</svg>
