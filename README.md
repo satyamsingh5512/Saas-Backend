@@ -166,7 +166,7 @@ internal/audit/                  Append-only audit log + activity feed
 internal/preferences/            Self-service profile, preferences, password change
 
 internal/routes/routes.go        Dependency injection root and route table
-internal/routes/web/             Embedded dashboard (index.html + assets)
+internal/routes/web/             Embedded landing page + dashboard (landing.html, index.html, assets)
 
 pkg/apperror/                    Typed domain errors mapped to HTTP status
 pkg/apiresponse/                 {success, data, meta} envelope + pagination
@@ -294,8 +294,9 @@ make db-provision-app-role   # create the low-privilege app_user role
 make run                     # start the server
 ```
 
-Open `http://localhost:8080` and create a workspace. The dashboard is served
-from the same origin as the API, so no CORS configuration is needed.
+Open `http://localhost:8080` for the landing page, or go straight to
+`http://localhost:8080/app` and create a workspace. Both are served from the same
+origin as the API, so no CORS configuration is needed.
 
 The two-credential split matters: migrations need privileges (`CREATE POLICY`,
 `CREATE ROLE`) that the runtime role deliberately lacks. Pointing `DB_USER` at a
@@ -318,15 +319,17 @@ cross-tenant reads, plan quota rejection, invite redemption, API key scope
 enforcement, and audit capture.
 
 When changing the dashboard JavaScript, run `node --check
-internal/routes/web/assets/app.js`; it is not covered by `go vet`.
+internal/routes/web/assets/app.js`; it is not covered by `go vet`. The same
+applies to `landing.js` and `theme.js`.
 
 The stylesheet *is* covered. `TestInkRampMeetsWCAGAA` parses `app.css`, resolves
 each ink token through the neutral ramp for both schemes, and computes the real
 WCAG 2.1 contrast ratio against the backgrounds the token is painted on, failing
-below 4.5:1. `TestDarkSchemeBlocksAgreeOnRamp` asserts the two dark blocks — the
+below 4.5:1. `TestDarkSchemeBlocksAgree` asserts the two dark blocks — the
 `prefers-color-scheme` one and the `:root.theme-dark` override — never drift
-apart, since the file has to declare that ramp twice. Both read from the embedded
-filesystem the server serves from, so neither can pass against a stale copy.
+apart on any declaration, since the file has to declare the whole dark scheme
+twice. Both read from the embedded filesystem the server serves from, so neither
+can pass against a stale copy.
 
 ## 11) Security Notes
 
@@ -353,10 +356,37 @@ filesystem the server serves from, so neither can pass against a stale copy.
 
 ## 12) Web Workspace
 
-The dashboard at `/` is embedded in the binary: no separate frontend build,
-static host, or CORS boundary. It covers overview and quota usage, projects,
-teams, members and invitations, roles and permissions, API keys, billing,
-the audit log, and account settings.
+Two documents ship inside the binary, with no separate frontend build, static
+host, or CORS boundary. `/` is the landing page; `/app` is the dashboard, which
+covers overview and quota usage, projects, teams, members and invitations, roles
+and permissions, API keys, billing, the audit log, and account settings.
+
+The landing page has no design system of its own — it loads `app.css` for the
+token layer and shared primitives and adds only `landing.css` on top, so the two
+cannot drift apart visually. One rule governs its layout: a frame is something a
+section has to earn by being a surface you could point at. The product figure,
+the lifecycle panel, the code block and the plan cards are bordered; every other
+section is built from rules, indents and type. An earlier version framed eight
+consecutive sections identically, and the effect was that the reader stopped
+seeing sections and started seeing a template. Motion follows the same logic:
+the default reveal translates, but ruled sections instead draw their own rule
+along its axis and only fade the type, so the animation is the section's device
+performing itself rather than a generic entrance applied to everything.
+
+Two of its sections are genuinely live rather than illustrative: the hero status
+pill measures a real request to `/health` and reports the failure if there is
+one, and the pricing cards are rendered from `GET /api/v1/billing/plans`, so the
+limits shown are the limits the server enforces. The isolation section animates
+the real middleware chain with sample rows, and says so. `landing.js` also
+forwards legacy `/#/route` bookmarks to `/app`, since the workspace used to live
+at `/`.
+
+Four tests in `web_landing_test.go` turn that file's header rules into build
+failures: no `innerHTML` anywhere (the plan cards render API data), no inline
+`style` attribute (`style-src 'self'` blocks it, so it would fail only behind the
+real server), every `#id` the script looks up exists in the markup (each lookup
+fails soft, so a rename would leave a section silently inert), and `landing.css`
+declares neither a `prefers-color-scheme` block nor a px `font-size`.
 
 Implementation constraints worth knowing before editing it:
 
