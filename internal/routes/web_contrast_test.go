@@ -113,7 +113,7 @@ func loadStylesheet(t *testing.T) string {
 // ramp per scheme, so resolving an alias against each ramp is enough to cover
 // both themes. The dark ramp is read from the `:root.theme-dark` block; the
 // file's own comment requires that block to stay byte-identical to the
-// prefers-color-scheme one, and TestDarkSchemeBlocksAgreeOnRamp below enforces it.
+// prefers-color-scheme one, and TestDarkSchemeBlocksAgree below enforces it.
 func parseSchemes(t *testing.T, css string) []scheme {
 	t.Helper()
 
@@ -194,15 +194,22 @@ func TestInkRampMeetsWCAGAA(t *testing.T) {
 	}
 }
 
-// TestDarkSchemeBlocksAgreeOnRamp guards the one duplication the stylesheet
-// knowingly accepts. Dark mode is declared twice — once under
-// prefers-color-scheme for "system", once as :root.theme-dark for an explicit
-// override — because CSS cannot share a declaration block between a media
-// query and a class selector. The file's comment says "keep the two blocks in
-// sync"; a comment is not a mechanism, so this asserts it. Without this, the
-// contrast test above could pass on the class block while the media block
-// (what most users actually get) had drifted.
-func TestDarkSchemeBlocksAgreeOnRamp(t *testing.T) {
+// TestDarkSchemeBlocksAgree guards the one duplication the stylesheet knowingly
+// accepts. Dark mode is declared twice — once under prefers-color-scheme for
+// "system", once as :root.theme-dark for an explicit override — because CSS
+// cannot share a declaration block between a media query and a class selector.
+// The file's comment says "keep the two blocks in sync"; a comment is not a
+// mechanism, so this asserts it. Without this, the contrast test above could
+// pass on the class block while the media block (what a "system" user actually
+// gets) had drifted.
+//
+// Every custom property is compared, not just the --n-* ramp. The blocks carry
+// well over the ramp alone — surfaces (--chrome, --control, --elevated), the
+// dark-only elevation channels (--edge, --glow), status ink, --backdrop and
+// --skeleton — and a drift in any one of them produces a UI that differs between
+// system-dark and explicit-dark, which is precisely the bug class that is
+// hardest to notice because each block looks correct on its own.
+func TestDarkSchemeBlocksAgree(t *testing.T) {
 	css := loadStylesheet(t)
 
 	mediaAt := strings.Index(css, "@media (prefers-color-scheme: dark)")
@@ -211,36 +218,63 @@ func TestDarkSchemeBlocksAgreeOnRamp(t *testing.T) {
 		t.Fatal("unexpected ordering of the dark scheme blocks in app.css")
 	}
 
-	parseFirst := func(section string) map[string]string {
-		out := map[string]string{}
-		for _, m := range rampDecl.FindAllStringSubmatch(section, -1) {
-			if _, seen := out[m[1]]; !seen {
-				out[m[1]] = m[2]
-			}
-		}
-		return out
-	}
-
-	// The media block runs from its start to where the class block begins.
-	media := parseFirst(css[mediaAt:classAt])
-	class := parseFirst(css[classAt:])
+	media := parseDeclarations(css[mediaAt:classAt])
+	class := parseDeclarations(css[classAt:])
 
 	if len(media) == 0 {
-		t.Fatal("parsed no ramp steps from the prefers-color-scheme dark block")
+		t.Fatal("parsed no declarations from the prefers-color-scheme dark block")
 	}
 
-	for step, mediaVal := range media {
-		classVal, ok := class[step]
+	for prop, mediaVal := range media {
+		classVal, ok := class[prop]
 		if !ok {
-			t.Errorf("--%s is defined in the prefers-color-scheme dark block but missing from :root.theme-dark", step)
+			t.Errorf("--%s is defined in the prefers-color-scheme dark block but missing from :root.theme-dark", prop)
 			continue
 		}
 		if !strings.EqualFold(mediaVal, classVal) {
 			t.Errorf(
-				"dark scheme ramp drift on --%s: prefers-color-scheme says %s, :root.theme-dark says %s.\n"+
+				"dark scheme drift on --%s: prefers-color-scheme says %q, :root.theme-dark says %q.\n"+
 					"These two blocks must stay identical or system-dark and explicit-dark render differently.",
-				step, mediaVal, classVal,
+				prop, mediaVal, classVal,
 			)
 		}
 	}
+	for prop := range class {
+		if _, ok := media[prop]; !ok {
+			t.Errorf("--%s is defined in :root.theme-dark but missing from the prefers-color-scheme dark block", prop)
+		}
+	}
+}
+
+var (
+	// Matches any custom-property declaration and captures name and value. The
+	// value pattern spans newlines deliberately: --glow is written over two
+	// lines, and a single-line-only pattern would silently skip it.
+	customProp = regexp.MustCompile(`--([a-z0-9-]+):\s*([^;{}]+);`)
+	cssComment = regexp.MustCompile(`(?s)/\*.*?\*/`)
+	wsRun      = regexp.MustCompile(`\s+`)
+)
+
+// parseDeclarations returns the custom properties declared in one block, keyed by
+// name, with values whitespace-normalised so the two blocks' different
+// indentation depths do not read as a difference.
+//
+// Comments are stripped first. Both blocks carry long rationale comments that
+// mention token names and hex values, and a comment is not a declaration.
+func parseDeclarations(section string) map[string]string {
+	section = cssComment.ReplaceAllString(section, "")
+	// Stop at the end of the first rule so a following block cannot leak in. The
+	// media block's own body ends at the first line-leading "}" too, since the
+	// nested :root rule is indented.
+	if end := strings.Index(section, "\n}"); end >= 0 {
+		section = section[:end]
+	}
+
+	out := map[string]string{}
+	for _, m := range customProp.FindAllStringSubmatch(section, -1) {
+		if _, seen := out[m[1]]; !seen {
+			out[m[1]] = strings.TrimSpace(wsRun.ReplaceAllString(m[2], " "))
+		}
+	}
+	return out
 }
