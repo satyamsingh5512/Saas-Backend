@@ -30,6 +30,12 @@ type EventPublisher interface {
 	Publish(ctx context.Context, topic string, key string, payload any) error
 }
 
+// RoleDelegationAuthorizer prevents invitations from bypassing the same rank
+// and permission-subset rules used by direct role assignment.
+type RoleDelegationAuthorizer interface {
+	CanDelegateRole(ctx context.Context, tenantID, actorID, roleID uuid.UUID) error
+}
+
 // Config holds invitation tunables.
 type Config struct {
 	// TTL bounds how long an invite remains redeemable. A short window limits the
@@ -43,14 +49,15 @@ type Service struct {
 	audit  Recorder
 	quotas SeatQuotaChecker
 	events EventPublisher
+	roles  RoleDelegationAuthorizer
 	cfg    Config
 }
 
-func NewService(repo *Repository, recorder Recorder, quotas SeatQuotaChecker, events EventPublisher, cfg Config) *Service {
+func NewService(repo *Repository, recorder Recorder, quotas SeatQuotaChecker, events EventPublisher, roles RoleDelegationAuthorizer, cfg Config) *Service {
 	if cfg.TTL <= 0 {
 		cfg.TTL = 7 * 24 * time.Hour
 	}
-	return &Service{repo: repo, audit: recorder, quotas: quotas, events: events, cfg: cfg}
+	return &Service{repo: repo, audit: recorder, quotas: quotas, events: events, roles: roles, cfg: cfg}
 }
 
 // CreateInput is the validated input for issuing an invitation. Exactly one of
@@ -79,6 +86,11 @@ func (s *Service) Create(ctx context.Context, entry audit.Entry, tenantID, actor
 	roleID, err := s.resolveRole(ctx, in)
 	if err != nil {
 		return nil, err
+	}
+	if s.roles != nil {
+		if err := s.roles.CanDelegateRole(ctx, tenantID, actorID, roleID); err != nil {
+			return nil, err
+		}
 	}
 
 	// Seat quota is checked before the invite is issued, and pending invites count
