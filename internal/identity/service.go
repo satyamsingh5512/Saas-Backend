@@ -2,6 +2,7 @@ package identity
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -60,6 +61,13 @@ type Service struct {
 
 func NewService(repo *Repository, tenantRepo *tenancy.Repository, roles RoleAssigner, events EventPublisher, db *gorm.DB, cfg Config, oauthCfg OAuthConfig) *Service {
 	return &Service{repo: repo, tenantRepo: tenantRepo, roles: roles, events: events, db: db, cfg: cfg, oauthCfg: oauthCfg}
+}
+
+// ValidateCredentialState is called after JWT signature validation on every
+// protected request; database state, not token age, decides whether the subject
+// may continue using the credential.
+func (s *Service) ValidateCredentialState(ctx context.Context, tenantID, userID uuid.UUID) error {
+	return s.repo.ValidateCredentialState(ctx, tenantID, userID)
 }
 
 // Register creates a new tenant and its first user (assigned the Owner
@@ -194,6 +202,10 @@ func (s *Service) Login(ctx context.Context, req LoginRequest) (*LoginResponse, 
 	if candidate.Status == StatusDisabled {
 		return nil, apperror.New(apperror.CodeForbidden, "account is disabled")
 	}
+	currentTenant, err := s.tenantRepo.FindByID(ctx, candidate.TenantID)
+	if err != nil || currentTenant.Status != tenancy.StatusActive {
+		return nil, apperror.New(apperror.CodeForbidden, "organization is not active")
+	}
 
 	roleSlug, err := s.roles.PrimaryRoleSlug(ctxWithTenantID(ctx, candidate.TenantID), candidate.ID)
 	if err != nil {
@@ -224,50 +236,39 @@ func (s *Service) Refresh(ctx context.Context, req RefreshRequest) (*TokenPair, 
 		return nil, apperror.New(apperror.CodeUnauthorized, "invalid refresh token")
 	}
 
-	if stored.RevokedAt != nil || stored.ReplacedBy != nil {
-		// Reuse of an already-rotated or revoked token: revoke the whole
-		// family defensively, then reject.
-		_ = s.repo.RevokeRefreshTokenFamily(ctx, stored.TenantID, stored.FamilyID)
-		return nil, apperror.New(apperror.CodeUnauthorized, "refresh token has been revoked")
-	}
-	if time.Now().After(stored.ExpiresAt) {
-		return nil, apperror.New(apperror.CodeUnauthorized, "refresh token has expired")
-	}
-
-	scopedCtx := ctxWithTenantID(ctx, stored.TenantID)
-	user, err := s.repo.FindByID(scopedCtx, stored.UserID)
-	if err != nil {
-		return nil, apperror.New(apperror.CodeUnauthorized, "invalid refresh token")
-	}
-
-	roleSlug, err := s.roles.PrimaryRoleSlug(scopedCtx, user.ID)
-	if err != nil {
-		roleSlug = "member"
-	}
-
 	newRefreshPlain, newRefreshRow, err := s.newRefreshTokenRow(stored.TenantID, stored.UserID, stored.FamilyID)
 	if err != nil {
 		return nil, apperror.Wrap(apperror.CodeInternal, "failed to generate refresh token", err)
 	}
-
-	if err := s.repo.CreateRefreshToken(scopedCtx, stored.TenantID, newRefreshRow); err != nil {
-		return nil, apperror.Wrap(apperror.CodeInternal, "failed to persist refresh token", err)
+	user, err := s.repo.RotateRefreshToken(ctx, stored.TenantID, stored.ID, newRefreshRow)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrTenantInactive), errors.Is(err, ErrUserInactive):
+			return nil, apperror.New(apperror.CodeForbidden, "account or organization is not active")
+		case errors.Is(err, ErrRefreshExpired):
+			return nil, apperror.New(apperror.CodeUnauthorized, "refresh token has expired")
+		case errors.Is(err, ErrRefreshReused):
+			return nil, apperror.New(apperror.CodeUnauthorized, "refresh token has been revoked")
+		case errors.Is(err, ErrRefreshInvalid):
+			return nil, apperror.New(apperror.CodeUnauthorized, "invalid refresh token")
+		default:
+			return nil, apperror.Wrap(apperror.CodeInternal, "failed to rotate refresh token", err)
+		}
 	}
-	if err := s.repo.MarkRefreshTokenReplaced(scopedCtx, stored.TenantID, stored.ID, newRefreshRow.ID); err != nil {
-		return nil, apperror.Wrap(apperror.CodeInternal, "failed to rotate refresh token", err)
-	}
 
+	scopedCtx := ctxWithTenantID(ctx, stored.TenantID)
+	roleSlug, err := s.roles.PrimaryRoleSlug(scopedCtx, user.ID)
+	if err != nil {
+		roleSlug = "member"
+	}
 	accessToken, accessExpiry, err := s.newAccessToken(user.ID, stored.TenantID, roleSlug)
 	if err != nil {
 		return nil, apperror.Wrap(apperror.CodeInternal, "failed to generate access token", err)
 	}
-
 	return &TokenPair{
-		AccessToken:           accessToken,
-		RefreshToken:          newRefreshPlain,
-		AccessTokenExpiresAt:  accessExpiry,
-		RefreshTokenExpiresAt: newRefreshRow.ExpiresAt,
-		TokenType:             "Bearer",
+		AccessToken: accessToken, RefreshToken: newRefreshPlain,
+		AccessTokenExpiresAt: accessExpiry, RefreshTokenExpiresAt: newRefreshRow.ExpiresAt,
+		TokenType: "Bearer",
 	}, nil
 }
 
@@ -290,12 +291,12 @@ func (s *Service) Logout(ctx context.Context, refreshToken string) error {
 // message regardless.
 func (s *Service) RequestPasswordReset(ctx context.Context, req ForgotPasswordRequest) error {
 	tenant, err := s.tenantRepo.FindBySlug(ctx, req.TenantSlug)
-	if err != nil {
+	if err != nil || tenant.Status != tenancy.StatusActive {
 		return nil
 	}
 	scopedCtx := ctxWithTenantID(ctx, tenant.ID)
 	user, err := s.repo.FindByEmailInTenant(scopedCtx, req.Email)
-	if err != nil {
+	if err != nil || user.Status == StatusDisabled {
 		return nil
 	}
 
@@ -334,33 +335,20 @@ func (s *Service) ResetPassword(ctx context.Context, req ResetPasswordRequest) e
 	if err != nil || vt.Purpose != PurposePasswordReset {
 		return apperror.New(apperror.CodeValidation, "invalid or expired reset token")
 	}
-	if vt.UsedAt != nil || time.Now().After(vt.ExpiresAt) {
-		return apperror.New(apperror.CodeValidation, "invalid or expired reset token")
-	}
-
-	scopedCtx := ctxWithTenantID(ctx, vt.TenantID)
-	user, err := s.repo.FindByID(scopedCtx, vt.UserID)
-	if err != nil {
-		return apperror.New(apperror.CodeValidation, "invalid or expired reset token")
-	}
-
 	hash, err := HashPassword(req.NewPassword)
 	if err != nil {
 		return apperror.Wrap(apperror.CodeInternal, "failed to process password", err)
 	}
-	user.PasswordHash = &hash
-	if err := s.repo.Update(scopedCtx, user); err != nil {
-		return apperror.Wrap(apperror.CodeInternal, "failed to update password", err)
+	if err := s.repo.ConsumePasswordReset(ctx, vt.TenantID, vt.ID, vt.UserID, hash); err != nil {
+		if errors.Is(err, ErrVerificationInvalid) || errors.Is(err, ErrTenantInactive) || errors.Is(err, ErrUserInactive) {
+			return apperror.New(apperror.CodeValidation, "invalid or expired reset token")
+		}
+		return apperror.Wrap(apperror.CodeInternal, "failed to reset password", err)
 	}
-	_ = s.repo.MarkVerificationTokenUsed(scopedCtx, vt.TenantID, vt.ID)
 
-	// Revoking all refresh tokens on password change is a deliberate
-	// security choice: a leaked password being reset should also
-	// invalidate any sessions established with (possibly) the old,
-	// compromised password.
 	if s.events != nil {
-		_ = s.events.Publish(ctx, "auth.password_changed", user.ID.String(), map[string]any{
-			"user_id": user.ID, "tenant_id": vt.TenantID,
+		_ = s.events.Publish(ctx, "auth.password_changed", vt.UserID.String(), map[string]any{
+			"user_id": vt.UserID, "tenant_id": vt.TenantID,
 		})
 	}
 	return nil
@@ -407,26 +395,16 @@ func (s *Service) VerifyEmail(ctx context.Context, req VerifyEmailRequest) error
 	if err != nil || vt.Purpose != PurposeEmailVerification {
 		return apperror.New(apperror.CodeValidation, "invalid or expired verification token")
 	}
-	if vt.UsedAt != nil || time.Now().After(vt.ExpiresAt) {
-		return apperror.New(apperror.CodeValidation, "invalid or expired verification token")
+	if err := s.repo.ConsumeEmailVerification(ctx, vt.TenantID, vt.ID, vt.UserID); err != nil {
+		if errors.Is(err, ErrVerificationInvalid) || errors.Is(err, ErrTenantInactive) || errors.Is(err, ErrUserInactive) {
+			return apperror.New(apperror.CodeValidation, "invalid or expired verification token")
+		}
+		return apperror.Wrap(apperror.CodeInternal, "failed to verify email", err)
 	}
-
-	scopedCtx := ctxWithTenantID(ctx, vt.TenantID)
-	user, err := s.repo.FindByID(scopedCtx, vt.UserID)
-	if err != nil {
-		return apperror.New(apperror.CodeValidation, "invalid or expired verification token")
-	}
-
-	now := time.Now()
-	user.EmailVerifiedAt = &now
-	if err := s.repo.Update(scopedCtx, user); err != nil {
-		return apperror.Wrap(apperror.CodeInternal, "failed to update user", err)
-	}
-	_ = s.repo.MarkVerificationTokenUsed(scopedCtx, vt.TenantID, vt.ID)
 
 	if s.events != nil {
-		_ = s.events.Publish(ctx, "user.email_verified", user.ID.String(), map[string]any{
-			"user_id": user.ID, "tenant_id": vt.TenantID,
+		_ = s.events.Publish(ctx, "user.email_verified", vt.UserID.String(), map[string]any{
+			"user_id": vt.UserID, "tenant_id": vt.TenantID,
 		})
 	}
 	return nil
