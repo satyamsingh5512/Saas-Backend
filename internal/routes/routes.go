@@ -87,7 +87,7 @@ func Setup(db *gorm.DB, cfg *config.Config) *gin.Engine {
 	projectHandler := projects.NewHandler(projectService)
 
 	invitationService := invitations.NewService(
-		invitations.NewRepository(db), auditService, billingService, eventbus.NoopPublisher{},
+		invitations.NewRepository(db), auditService, billingService, eventbus.NoopPublisher{}, authzService,
 		invitations.Config{TTL: config.Duration(cfg.InvitationTTL, 0)})
 	invitationHandler := invitations.NewHandler(invitationService)
 
@@ -164,7 +164,7 @@ func Setup(db *gorm.DB, cfg *config.Config) *gin.Engine {
 		// presented; identity.RequireAuth then handles JWTs and produces the single
 		// 401 when neither credential is present.
 		protected.Use(apikeys.Authenticate(apiKeyService))
-		protected.Use(identity.RequireAuth(cfg.JWTSecret))
+		protected.Use(identity.RequireAuth(cfg.JWTSecret, identityService))
 		{
 			protected.GET("/me", identityHandler.Me)
 			protected.POST("/verify-email/request", identityHandler.RequestEmailVerification)
@@ -195,6 +195,7 @@ func Setup(db *gorm.DB, cfg *config.Config) *gin.Engine {
 			roles := protected.Group("/roles")
 			{
 				roles.GET("", authzService.RequirePermission(authz.PermRoleView), authzHandler.ListRoles)
+				roles.GET("/:roleID/permissions", authzService.RequirePermission(authz.PermRoleView), authzHandler.GetRolePermissions)
 				roles.POST("", authzService.RequirePermission(authz.PermRoleManage), authzHandler.CreateRole)
 				roles.PUT("/:roleID/permissions", authzService.RequirePermission(authz.PermRoleManage), authzHandler.UpdateRolePermissions)
 				roles.DELETE("/:roleID", authzService.RequirePermission(authz.PermRoleManage), authzHandler.DeleteRole)
@@ -265,23 +266,50 @@ func Setup(db *gorm.DB, cfg *config.Config) *gin.Engine {
 	return router
 }
 
-// registerWebRoutes serves the embedded single-page dashboard.
+// registerWebRoutes serves the embedded marketing page and single-page dashboard.
 //
-// Unknown non-API paths fall through to the SPA document so client-side routes
-// (/projects, /settings, ...) survive a page refresh, while anything under /api/
-// keeps returning a JSON 404 instead of HTML -- an API client parsing an HTML
-// error page is a worse failure than a clear 404.
+// "/" is the landing page and "/app" is the workspace. The dashboard routes with
+// the URL fragment ("/app#/projects"), which the server never sees, so the split
+// needs no path handling here and no base-path awareness in app.js.
+//
+// Unknown non-API paths fall through to the SPA document, which is what makes a
+// stale bookmark or a hand-typed /projects still land somewhere useful, while
+// anything under /api/ keeps returning a JSON 404 instead of HTML -- an API
+// client parsing an HTML error page is a worse failure than a clear 404.
 func registerWebRoutes(router *gin.Engine) {
 	dashboard, err := webFiles.ReadFile("web/index.html")
 	if err != nil {
 		panic("embedded dashboard is unavailable: " + err.Error())
+	}
+	landing, err := webFiles.ReadFile("web/landing.html")
+	if err != nil {
+		panic("embedded landing page is unavailable: " + err.Error())
+	}
+	favicon, err := webFiles.ReadFile("web/assets/brand/favicon.ico")
+	if err != nil {
+		panic("embedded favicon is unavailable: " + err.Error())
+	}
+	manifest, err := webFiles.ReadFile("web/assets/site.webmanifest")
+	if err != nil {
+		panic("embedded web manifest is unavailable: " + err.Error())
 	}
 
 	serveDashboard := func(c *gin.Context) {
 		c.Data(http.StatusOK, "text/html; charset=utf-8", dashboard)
 	}
 
-	router.GET("/", serveDashboard)
+	router.GET("/", func(c *gin.Context) {
+		c.Data(http.StatusOK, "text/html; charset=utf-8", landing)
+	})
+	router.GET("/app", serveDashboard)
+	// Conventional root paths are still requested by browsers, crawlers and
+	// install surfaces even when the documents declare explicit asset URLs.
+	router.GET("/favicon.ico", func(c *gin.Context) {
+		c.Data(http.StatusOK, "image/x-icon", favicon)
+	})
+	router.GET("/site.webmanifest", func(c *gin.Context) {
+		c.Data(http.StatusOK, "application/manifest+json; charset=utf-8", manifest)
+	})
 	router.StaticFS("/assets", assetFileSystem())
 
 	router.NoRoute(func(c *gin.Context) {
