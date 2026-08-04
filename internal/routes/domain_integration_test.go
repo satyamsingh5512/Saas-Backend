@@ -456,9 +456,12 @@ func TestPreferencesProfileAndNotifications(t *testing.T) {
 
 	token, _ := registerOwner(t, router, slug)
 
-	// Preferences read back as defaults before anything is saved.
+	// Preferences read back as defaults before anything is saved. Theme defaults
+	// to dark, matching preferences.Defaults() and the column default set by
+	// migration 000013 — dark is the product's primary scheme, not a mirror of
+	// the caller's OS setting.
 	prefs := dataObject(t, doJSON(router, http.MethodGet, "/api/v1/preferences", nil, token))
-	if prefs["theme"] != "system" || prefs["timezone"] != "UTC" {
+	if prefs["theme"] != "dark" || prefs["timezone"] != "UTC" {
 		t.Errorf("expected default preferences, got %v", prefs)
 	}
 
