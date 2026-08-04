@@ -1,0 +1,940 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark light" />
+    <meta name="theme-color" content="#000000" />
+    <meta
+      name="description"
+      content="Tenancy is a production-grade multi-tenant backend in Go: authentication, database-driven RBAC, teams, invitations, API keys, plan quotas and an append-only audit trail, with tenant isolation enforced by PostgreSQL row-level security."
+    />
+    <title>Tenancy — multi-tenant backend with isolation the database enforces</title>
+
+    <!-- Canonical brand surfaces. SVG is the modern favicon, ICO is the legacy
+         fallback, PNG handles touch/install contexts, and the manifest points at
+         the same generated geometry. No third-party origin is contacted. -->
+    <link rel="icon" href="/assets/brand/favicon.svg" type="image/svg+xml" />
+    <link rel="alternate icon" href="/favicon.ico" sizes="any" />
+    <link rel="apple-touch-icon" href="/assets/brand/apple-touch-icon.png" sizes="180x180" />
+    <link rel="mask-icon" href="/assets/brand/safari-pinned-tab.svg" color="#5e6ad2" />
+    <link rel="manifest" href="/site.webmanifest" />
+    <meta name="application-name" content="Tenancy" />
+    <meta name="apple-mobile-web-app-title" content="Tenancy" />
+    <meta name="msapplication-TileColor" content="#000000" />
+    <meta name="msapplication-TileImage" content="/assets/brand/icon-192.png" />
+
+    <!-- Social cards use the same mark and brand ramp; the image is relative so
+         self-hosted deployments do not publish somebody else's canonical host. -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Tenancy" />
+    <meta property="og:title" content="Tenancy — multi-tenant isolation your database enforces" />
+    <meta property="og:description" content="Authentication, database-driven RBAC, teams, invitations, API keys, plan quotas, and an append-only audit trail — one Go binary." />
+    <meta property="og:image" content="/assets/brand/social-card.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="Tenancy — multi-tenant isolation your database enforces" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Tenancy — multi-tenant isolation your database enforces" />
+    <meta name="twitter:description" content="Authentication, RBAC, teams, invitations, API keys, quotas, and audit — one Go binary." />
+    <meta name="twitter:image" content="/assets/brand/social-card.png" />
+    <meta name="twitter:image:alt" content="Tenancy — multi-tenant isolation your database enforces" />
+
+    <!--
+      Both scripts are synchronous and in <head> on purpose.
+      theme.js resolves the colour scheme before first paint (see its own note).
+      landing.js forwards legacy `/#/route` bookmarks to /app before anything is
+      drawn, so a returning user never sees the marketing page flash past. Its
+      interactive work is deferred internally until DOMContentLoaded.
+      Neither can be inline: the server sends script-src 'self'.
+    -->
+    <script src="/assets/theme.js"></script>
+    <script src="/assets/landing.js"></script>
+
+    <!--
+      app.css first, for the token layer and the shared primitives (.btn, .badge,
+      .icon, .logo). The landing page deliberately has no design system of its
+      own: it reads the same ramp, type scale, spacing and motion tokens the
+      dashboard does, so the two cannot drift apart visually.
+    -->
+    <link rel="stylesheet" href="/assets/app.css" />
+    <link rel="stylesheet" href="/assets/landing.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+
+    <svg class="sprite" aria-hidden="true" focusable="false">
+      <!-- 1.75 stroke, 24px grid, matching the dashboard's icon geometry -->
+      <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3.5 5 6v5.5c0 4.4 3 7.5 7 9 4-1.5 7-4.6 7-9V6Z"/><path d="m9 12 2 2 4-4"/></symbol>
+      <symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="8.5" rx="2"/><path d="M8.25 11V8.5a3.75 3.75 0 0 1 7.5 0V11"/></symbol>
+      <symbol id="i-users" viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.25"/><path d="M5 19.5v-1A4.5 4.5 0 0 1 9.5 14h5a4.5 4.5 0 0 1 4.5 4.5v1"/></symbol>
+      <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 7.5A1.5 1.5 0 0 1 4.5 6h3.9a1.5 1.5 0 0 1 1.2.6l1 1.4h8A1.5 1.5 0 0 1 20 9.5v8A1.5 1.5 0 0 1 18.5 19h-14A1.5 1.5 0 0 1 3 17.5Z"/></symbol>
+      <symbol id="i-key" viewBox="0 0 24 24"><circle cx="8" cy="14" r="3.5"/><path d="m10.6 11.4 7.4-7.4"/><path d="m15 7 2.5 2.5"/><path d="m18 4 2 2"/></symbol>
+      <symbol id="i-card" viewBox="0 0 24 24"><rect x="3" y="5.5" width="18" height="13" rx="2"/><path d="M3 10h18"/><path d="M6.5 14.5h3"/></symbol>
+      <symbol id="i-activity" viewBox="0 0 24 24"><path d="M3 12h3.5L9 5l3.5 14L15 12h6"/></symbol>
+      <symbol id="i-arrow-right" viewBox="0 0 24 24"><path d="M4.5 12h14"/><path d="m13 6.5 5.5 5.5L13 17.5"/></symbol>
+      <symbol id="i-check" viewBox="0 0 24 24"><path d="m5.5 12.5 4.5 4.5 8.5-9"/></symbol>
+      <symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M15.5 9V6.5A2 2 0 0 0 13.5 4.5H6.5A2 2 0 0 0 4.5 6.5v7a2 2 0 0 0 2 2H9"/></symbol>
+      <symbol id="i-db" viewBox="0 0 24 24"><ellipse cx="12" cy="6.5" rx="7" ry="2.75"/><path d="M5 6.5v11c0 1.5 3.1 2.75 7 2.75s7-1.25 7-2.75v-11"/><path d="M5 12c0 1.5 3.1 2.75 7 2.75s7-1.25 7-2.75"/></symbol>
+      <symbol id="i-layers" viewBox="0 0 24 24"><path d="m12 3.5 8 4.25-8 4.25L4 7.75Z"/><path d="m4 12.25 8 4.25 8-4.25"/><path d="m4 16.5 8 4.25 8-4.25"/></symbol>
+      <symbol id="i-bolt" viewBox="0 0 24 24"><path d="M13.5 3 5.5 13.5h5L10 21l8.5-10.5h-5.2Z"/></symbol>
+      <symbol id="i-terminal" viewBox="0 0 24 24"><rect x="3" y="4.5" width="18" height="15" rx="2"/><path d="m7.5 10 2.5 2-2.5 2"/><path d="M12.5 14h4"/></symbol>
+      <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 1.8"/></symbol>
+      <symbol id="i-mail" viewBox="0 0 24 24"><rect x="3" y="5.5" width="18" height="13" rx="2"/><path d="m3.8 7 8.2 5.8L20.2 7"/></symbol>
+      <symbol id="i-plug" viewBox="0 0 24 24"><path d="M9 3.5v5"/><path d="M15 3.5v5"/><path d="M6.5 8.5h11v3a5.5 5.5 0 0 1-11 0Z"/><path d="M12 17v3.5"/></symbol>
+    </svg>
+
+    <!-- ══════════════════════════════ Nav ══════════════════════════════ -->
+    <header class="ld-nav" id="ld-nav">
+      <div class="ld-nav__inner">
+        <a class="ld-brand" href="/" aria-label="Tenancy home">
+          <img class="logo" src="/assets/brand/logo-mark.svg" width="30" height="30" alt="" />
+          <span class="logo__word">Tenancy</span>
+        </a>
+        <nav class="ld-nav__links" aria-label="Sections">
+          <a href="#lifecycle">Isolation</a>
+          <a href="#architecture">Architecture</a>
+          <a href="#capabilities">Features</a>
+          <a href="#pricing">Pricing</a>
+          <a href="#faq">FAQ</a>
+        </nav>
+        <div class="ld-nav__actions">
+          <a class="btn btn--ghost" href="/app">Sign in</a>
+          <a class="btn btn--primary" href="/app">Start building</a>
+        </div>
+      </div>
+    </header>
+
+    <main id="main">
+      <!-- ═════════════════════════════ Hero ════════════════════════════ -->
+      <section class="hero">
+        <div class="ld-shell hero__inner">
+          <!--
+            A live status pill, not a decorative badge: landing.js measures a real
+            request to /health and prints the real round trip. If the API is down
+            it says so. A "trust" element that could lie while the product is
+            broken is worth less than no element at all.
+          -->
+          <p class="pill rise rise--1" id="status-pill" data-state="loading">
+            <span class="pill__dot"></span>
+            <span class="pill__text" id="status-text">Checking API…</span>
+          </p>
+
+          <h1 class="hero__title rise rise--2">
+            Multi-tenant isolation your database enforces,
+            <span class="hero__title-dim">not your code review.</span>
+          </h1>
+
+          <p class="hero__sub rise rise--3">
+            Tenancy is the organization layer every B2B product needs before it
+            can build its own: authentication, database-driven roles, teams,
+            invitations, API keys, plan quotas and an append-only audit trail.
+            One Go binary, one Postgres database, many tenants — and a forgotten
+            <code class="code">WHERE tenant_id</code> can no longer leak a row.
+          </p>
+
+          <div class="hero__cta rise rise--4">
+            <a class="btn btn--primary btn--lg" href="/app">
+              Start building
+              <svg class="icon icon--sm" aria-hidden="true" focusable="false"><use href="#i-arrow-right"></use></svg>
+            </a>
+            <a class="btn btn--secondary btn--lg" href="#lifecycle">See how isolation works</a>
+          </div>
+
+          <p class="hero__note rise rise--5">
+            Runs on one Postgres container. The dashboard ships inside the
+            binary — no frontend build, no static host, no CORS boundary.
+          </p>
+
+          <!--
+            The workspace, drawn from the real design system rather than captured
+            as an image — so it cannot go stale against a redesign the way a PNG
+            does, and so it is the actual component styling rather than a
+            picture of it.
+
+            It carries real content on purpose. The earlier version of this
+            figure was rows of grey bars, which is the visual language of a
+            loading skeleton: it says "a UI goes here" instead of showing one,
+            and a reader cannot tell a placeholder from a product. Labels and
+            figures make it legible in the two seconds it gets.
+
+            aria-hidden because every fact in it is stated in the prose above; a
+            screen reader gaining a second, tabular copy of the same claims is
+            noise, not access.
+          -->
+          <div class="stage rise rise--6" aria-hidden="true">
+            <div class="stage__bar">
+              <span class="stage__dots"><i></i><i></i><i></i></span>
+              <span class="stage__path">acme.tenancy.app<em>/projects</em></span>
+              <span class="stage__kbd">⌘K</span>
+            </div>
+            <div class="stage__body">
+              <aside class="stage__side">
+                <span class="stage__org">
+                  <i class="stage__mark"></i>
+                  <b>Acme Inc</b>
+                  <em>pro plan</em>
+                </span>
+                <span class="stage__nav stage__nav--on">Projects</span>
+                <span class="stage__nav">Teams</span>
+                <span class="stage__nav">Members</span>
+                <span class="stage__nav">API keys</span>
+                <span class="stage__nav">Audit log</span>
+              </aside>
+
+              <div class="stage__main">
+                <div class="stage__meters">
+                  <span class="meter-mini">
+                    <b>Seats</b>
+                    <em>12 <s>/ 50</s></em>
+                    <i class="meter-mini__track"><u class="meter-mini__fill meter-mini__fill--24"></u></i>
+                  </span>
+                  <span class="meter-mini">
+                    <b>Projects</b>
+                    <em>41 <s>/ 50</s></em>
+                    <i class="meter-mini__track"><u class="meter-mini__fill meter-mini__fill--82"></u></i>
+                  </span>
+                  <span class="meter-mini">
+                    <b>API keys</b>
+                    <em>3 <s>active</s></em>
+                    <i class="meter-mini__track"><u class="meter-mini__fill meter-mini__fill--18"></u></i>
+                  </span>
+                </div>
+
+                <div class="stage__table">
+                  <span class="stage__tr stage__tr--head">
+                    <b>Project</b><b>Owner</b><b>Status</b>
+                  </span>
+                  <span class="stage__tr">
+                    <b>Website redesign</b><em>Ada Lovelace</em><i class="tag tag--ok">active</i>
+                  </span>
+                  <span class="stage__tr">
+                    <b>Mobile app</b><em>Grace Hopper</em><i class="tag tag--ok">active</i>
+                  </span>
+                  <span class="stage__tr">
+                    <b>Data platform</b><em>Alan Turing</em><i class="tag">archived</i>
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ═══════════════════════════ Trust bar ═════════════════════════ -->
+      <!--
+        No customer logos and no testimonials, because there are none: inventing
+        either is the fastest way to lose a technical reader who checks. What
+        replaces them is a row of facts about the codebase that anyone can verify
+        by cloning it — which is the form of proof this audience actually values.
+      -->
+      <section class="band band--tight metrics" aria-label="At a glance">
+        <div class="ld-shell metrics__grid reveal">
+          <div class="metric">
+            <span class="metric__n" data-count="21">21</span>
+            <span class="metric__l">Permissions, editable per tenant</span>
+          </div>
+          <div class="metric">
+            <span class="metric__n" data-count="5">5</span>
+            <span class="metric__l">Roles seeded by database trigger</span>
+          </div>
+          <div class="metric">
+            <span class="metric__n" data-count="13">13</span>
+            <span class="metric__l">Versioned migrations, embedded</span>
+          </div>
+          <span class="metrics__split" aria-hidden="true"></span>
+          <div class="metric">
+            <span class="metric__n">1</span>
+            <span class="metric__l">Binary, API and dashboard together</span>
+          </div>
+          <div class="metric">
+            <span class="metric__n">0</span>
+            <span class="metric__l">Runtime frontend dependencies</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- ════════════════════════════ Problem ══════════════════════════ -->
+      <section class="band band--roomy" id="problem">
+        <div class="ld-shell">
+          <header class="sec reveal">
+            <p class="kicker">The part nobody budgets for</p>
+            <h2 class="sec__title">
+              You did not set out to build an invitation system.
+            </h2>
+            <p class="sec__sub">
+              Every B2B product arrives at the same six months of work before it
+              can charge anyone. It is all undifferentiated, all load-bearing,
+              and all of it fails quietly.
+            </p>
+          </header>
+
+          <!--
+            No cards here, deliberately. Eight sections built from the same
+            bordered rounded rectangle is what makes a page look generated: the
+            reader stops seeing sections and starts seeing a template. This one
+            is a ledger — a rule, an index, a claim — because the content is four
+            parallel statements of the same shape, and a ruled list says
+            "parallel" more economically than four boxes do.
+          -->
+          <ol class="faults reveal reveal--rule">
+            <li class="fault">
+              <span class="fault__n">01</span>
+              <h3 class="fault__title">One missing predicate is a breach</h3>
+              <p class="fault__text">
+                Isolation lives in whichever <code class="code">WHERE</code>
+                clause the last developer remembered. The query that forgets is
+                indistinguishable from the query that works — until it is in a
+                customer's export.
+              </p>
+            </li>
+            <li class="fault">
+              <span class="fault__n">02</span>
+              <h3 class="fault__title">Roles calcify into if-statements</h3>
+              <p class="fault__text">
+                Permissions start as three constants in middleware. By the time a
+                customer asks for a read-only auditor, changing who can do what
+                means a deploy.
+              </p>
+            </li>
+            <li class="fault">
+              <span class="fault__n">03</span>
+              <h3 class="fault__title">Machine access is an afterthought</h3>
+              <p class="fault__text">
+                API keys get bolted on with the permissions of whoever made them,
+                so a key silently gains power when its owner is promoted and
+                keeps it after they leave.
+              </p>
+            </li>
+            <li class="fault">
+              <span class="fault__n">04</span>
+              <h3 class="fault__title">The audit log arrives too late</h3>
+              <p class="fault__text">
+                It gets written the week the first security questionnaire lands,
+                on a table the application can still <code class="code">UPDATE</code>
+                — which is the one property an auditor asks about.
+              </p>
+            </li>
+          </ol>
+        </div>
+      </section>
+
+      <!-- ══════════════════════ Interactive lifecycle ══════════════════ -->
+      <section class="band band--alt band--roomy" id="lifecycle">
+        <div class="ld-shell">
+          <header class="sec sec--center reveal">
+            <p class="kicker">Isolation model</p>
+            <h2 class="sec__title">One request, three independent boundaries</h2>
+            <p class="sec__sub">
+              Pick a tenant, send the same request, and watch where the boundary
+              is actually applied. The query below carries no tenant predicate at
+              all — the database adds it.
+            </p>
+          </header>
+
+          <div class="demo reveal">
+            <div class="demo__head">
+              <div class="segment" role="group" aria-label="Signed-in tenant">
+                <button class="segment__btn" type="button" data-tenant="acme" aria-pressed="true">Acme Inc</button>
+                <button class="segment__btn" type="button" data-tenant="globex" aria-pressed="false">Globex</button>
+              </div>
+              <button class="btn btn--primary btn--sm demo__run" type="button" id="demo-run">
+                <svg class="icon icon--xs" aria-hidden="true" focusable="false"><use href="#i-bolt"></use></svg>
+                Send request
+              </button>
+            </div>
+
+            <div class="demo__body">
+              <!--
+                The trace is an ordered list because the order is the meaning:
+                each step is a precondition for the next, and a screen reader
+                user needs that structure, not six sibling divs.
+              -->
+              <ol class="trace" id="trace">
+                <li class="trace__step" data-step="0">
+                  <span class="trace__gutter"><span class="trace__dot"></span></span>
+                  <span class="trace__body">
+                    <span class="trace__label">Request ID assigned</span>
+                    <code class="trace__detail">GET /api/v1/projects</code>
+                  </span>
+                </li>
+                <li class="trace__step" data-step="1">
+                  <span class="trace__gutter"><span class="trace__dot"></span></span>
+                  <span class="trace__body">
+                    <span class="trace__label">Credential verified</span>
+                    <code class="trace__detail" data-slot="credential">Bearer eyJhbGciOi…</code>
+                  </span>
+                </li>
+                <li class="trace__step" data-step="2">
+                  <span class="trace__gutter"><span class="trace__dot"></span></span>
+                  <span class="trace__body">
+                    <span class="trace__label">Tenant taken from the credential</span>
+                    <code class="trace__detail" data-slot="tenant">tenant_id = …</code>
+                  </span>
+                </li>
+                <li class="trace__step" data-step="3">
+                  <span class="trace__gutter"><span class="trace__dot"></span></span>
+                  <span class="trace__body">
+                    <span class="trace__label">Permission gate</span>
+                    <code class="trace__detail">project:view — granted by role</code>
+                  </span>
+                </li>
+                <li class="trace__step" data-step="4">
+                  <span class="trace__gutter"><span class="trace__dot"></span></span>
+                  <span class="trace__body">
+                    <span class="trace__label">Scoped transaction opened</span>
+                    <code class="trace__detail" data-slot="scope">SET LOCAL app.tenant_id = …</code>
+                  </span>
+                </li>
+                <li class="trace__step" data-step="5">
+                  <span class="trace__gutter"><span class="trace__dot"></span></span>
+                  <span class="trace__body">
+                    <span class="trace__label">Row-level security filters the result</span>
+                    <code class="trace__detail" data-slot="rows">— rows returned</code>
+                  </span>
+                </li>
+              </ol>
+
+              <div class="demo__panels">
+                <figure class="pane">
+                  <figcaption class="pane__head">
+                    <svg class="icon icon--xs" aria-hidden="true" focusable="false"><use href="#i-db"></use></svg>
+                    The query the application sends
+                  </figcaption>
+                  <pre class="pane__code"><code><span class="tk-k">SELECT</span> id, name, status
+<span class="tk-k">FROM</span>   projects
+<span class="tk-k">WHERE</span>  deleted_at <span class="tk-k">IS NULL</span>
+<span class="tk-k">ORDER BY</span> created_at <span class="tk-k">DESC</span>;
+
+<span class="tk-c">-- no tenant predicate, on purpose</span></code></pre>
+                </figure>
+
+                <figure class="pane">
+                  <figcaption class="pane__head">
+                    <svg class="icon icon--xs" aria-hidden="true" focusable="false"><use href="#i-layers"></use></svg>
+                    What comes back
+                    <span class="pane__badge" id="demo-tenant-badge">acme</span>
+                  </figcaption>
+                  <div class="pane__rows" id="demo-rows" aria-live="polite">
+                    <p class="pane__idle">Send the request to see the rows this tenant can reach.</p>
+                  </div>
+                </figure>
+              </div>
+            </div>
+
+            <p class="demo__foot">
+              An illustration of the real middleware chain and policy, with
+              sample rows. The mechanism is not simulated: it is
+              <code class="code">pkg/txscope</code> plus a
+              <code class="code">FORCE ROW LEVEL SECURITY</code> policy on every
+              tenant-scoped table.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <!-- ═════════════════════════ Architecture ════════════════════════ -->
+      <section class="band" id="architecture">
+        <div class="ld-shell">
+          <header class="sec reveal">
+            <p class="kicker">Architecture</p>
+            <h2 class="sec__title">Four layers, one direction of travel</h2>
+            <p class="sec__sub">
+              Handlers never touch the database. Repositories never make
+              authorization decisions. Every tenant-scoped read and write goes
+              through a single path, which is why the guarantee holds.
+            </p>
+          </header>
+
+          <ol class="arch reveal reveal--spine">
+            <li class="arch__layer" data-layer="edge">
+              <div class="arch__meta">
+                <span class="arch__idx">Edge</span>
+                <h3 class="arch__title">Middleware chain</h3>
+                <p class="arch__text">
+                  Request ID, structured logging, panic recovery, security
+                  headers, CORS, then the credential. Rate limited per IP before
+                  authentication.
+                </p>
+              </div>
+              <div class="arch__nodes">
+                <span class="node">RequestID</span>
+                <span class="node">Logger</span>
+                <span class="node">Recovery</span>
+                <span class="node">Headers</span>
+                <span class="node node--on">Auth</span>
+                <span class="node node--on">Permission gate</span>
+              </div>
+            </li>
+            <li class="arch__layer" data-layer="domain">
+              <div class="arch__meta">
+                <span class="arch__idx">Domain</span>
+                <h3 class="arch__title">Twelve self-contained modules</h3>
+                <p class="arch__text">
+                  Each one is the same four files: entity, repository, service,
+                  handler. A module can be read in an afternoon and deleted
+                  without archaeology.
+                </p>
+              </div>
+              <div class="arch__nodes">
+                <span class="node">identity</span>
+                <span class="node">authz</span>
+                <span class="node">teams</span>
+                <span class="node">projects</span>
+                <span class="node">invitations</span>
+                <span class="node">apikeys</span>
+                <span class="node">billing</span>
+                <span class="node">audit</span>
+              </div>
+            </li>
+            <li class="arch__layer" data-layer="scope">
+              <div class="arch__meta">
+                <span class="arch__idx">Scope</span>
+                <h3 class="arch__title">One path to the database</h3>
+                <p class="arch__text">
+                  <code class="code">txscope</code> opens a transaction and sets
+                  <code class="code">app.tenant_id</code>.
+                  <code class="code">SET LOCAL</code> semantics mean the value
+                  cannot outlive it or leak across a pooled connection.
+                </p>
+              </div>
+              <div class="arch__nodes">
+                <span class="node node--on">BEGIN</span>
+                <span class="node node--on">set_config('app.tenant_id')</span>
+                <span class="node">query</span>
+                <span class="node">COMMIT</span>
+              </div>
+            </li>
+            <li class="arch__layer" data-layer="data">
+              <div class="arch__meta">
+                <span class="arch__idx">Data</span>
+                <h3 class="arch__title">PostgreSQL, with the policy on</h3>
+                <p class="arch__text">
+                  Every tenant-scoped table is <code class="code">ENABLE</code>
+                  and <code class="code">FORCE ROW LEVEL SECURITY</code>, so the
+                  policy applies even to the table owner. The runtime role is
+                  <code class="code">NOSUPERUSER NOBYPASSRLS</code>.
+                </p>
+              </div>
+              <div class="arch__nodes">
+                <span class="node node--on">RLS policy</span>
+                <span class="node">CITEXT</span>
+                <span class="node">JSONB</span>
+                <span class="node">triggers</span>
+                <span class="node">append-only audit</span>
+              </div>
+            </li>
+          </ol>
+        </div>
+      </section>
+
+      <!-- ════════════════════════ Capabilities ═════════════════════════ -->
+      <section class="band band--alt" id="capabilities">
+        <div class="ld-shell">
+          <header class="sec reveal">
+            <p class="kicker">What is already finished</p>
+            <h2 class="sec__title">Complete on the first day, not scaffolded</h2>
+            <p class="sec__sub">
+              Each capability is wired end to end — SQL schema, service rules,
+              HTTP surface, and a screen in the workspace.
+            </p>
+          </header>
+
+          <ul class="defs reveal reveal--rule">
+            <li class="def def--wide">
+              <h3 class="def__title">Authentication that survives a stolen token</h3>
+              <p class="def__text">
+                Password login, refresh-token rotation with reuse detection,
+                password reset, email verification, and Google or GitHub OAuth.
+                Changing a password revokes every refresh token for that user.
+              </p>
+              <ul class="def__facts">
+                <li>Rotating refresh families</li>
+                <li>bcrypt at rest</li>
+                <li>OAuth state signed with HMAC</li>
+              </ul>
+            </li>
+            <li class="def def--wide">
+              <h3 class="def__title">Roles you can edit at runtime</h3>
+              <p class="def__text">
+                Five roles and 21 permissions seeded per tenant. Checks resolve
+                from the database on every request, so a change applies without
+                a deploy.
+              </p>
+            </li>
+            <li class="def">
+              <h3 class="def__title">Keys that authorize themselves</h3>
+              <p class="def__text">
+                Scoped machine credentials, hashed at rest, revocable. A key
+                authorizes from its own scopes, never from its creator's current
+                role — and cannot be granted role or org management at all.
+              </p>
+            </li>
+            <li class="def">
+              <h3 class="def__title">Teams, members, invitations</h3>
+              <p class="def__text">
+                Single-use hashed invite tokens, redeemable without a prior
+                account, accepted in one atomic database function.
+              </p>
+            </li>
+            <li class="def">
+              <h3 class="def__title">Quotas enforced at the point of use</h3>
+              <p class="def__text">
+                Seat and project limits are checked before the write is allowed,
+                not reported on a dashboard afterwards.
+              </p>
+            </li>
+            <li class="def def--full">
+              <h3 class="def__title">An audit trail a compromised credential cannot edit</h3>
+              <p class="def__text">
+                <code class="code">audit_logs</code> is append-only in the
+                strongest available sense: the application role holds no
+                <code class="code">UPDATE</code> or <code class="code">DELETE</code>
+                grant on it, so erasing the trail is not a permission the running
+                process has to lose — it never had it.
+              </p>
+              <ul class="def__facts">
+                <li>Separate product-facing timeline</li>
+                <li>Secrets never written to entries</li>
+                <li>Actor, IP and user agent captured</li>
+              </ul>
+            </li>
+          </ul>
+        </div>
+      </section>
+
+      <!-- ═══════════════════════════ Security ══════════════════════════ -->
+      <section class="band" id="security">
+        <div class="ld-shell sec-split">
+          <header class="sec reveal">
+            <p class="kicker">Enterprise security</p>
+            <h2 class="sec__title">Guarantees, not intentions</h2>
+            <p class="sec__sub">
+              Each of these is a mechanism with a failure mode, chosen over a
+              convention with a code review.
+            </p>
+          </header>
+
+          <!--
+            A left rule and a hanging label rather than five cards with five green
+            ticks. The tick was doing no work: everything in a list titled
+            "guarantees" is affirmative, so a checkmark on every row carries zero
+            bits. The label carries the mechanism's name instead, which is the
+            thing a reviewer is actually scanning for.
+          -->
+          <dl class="creed reveal reveal--rule">
+            <div class="creed__item">
+              <dt class="creed__k">Runtime role</dt>
+              <dd class="creed__v">
+                <b>The app cannot bypass its own policies.</b> It connects as a
+                <code class="code">NOSUPERUSER NOBYPASSRLS</code> role, because a
+                superuser ignores row-level security entirely and would make the
+                isolation tests pass for the wrong reason.
+              </dd>
+            </div>
+            <div class="creed__item">
+              <dt class="creed__k">Tenant source</dt>
+              <dd class="creed__v">
+                <b>A header cannot choose your tenant.</b> Tenant identity comes
+                only from a verified credential. A pre-auth header or subdomain
+                that contradicts it is rejected with
+                <code class="code">TENANT_MISMATCH</code>.
+              </dd>
+            </div>
+            <div class="creed__item">
+              <dt class="creed__k">Pre-tenant lookups</dt>
+              <dd class="creed__v">
+                <b>The three unavoidable ones are narrowed, not excused.</b>
+                Invite tokens, API keys and login-by-email cannot know the tenant
+                in advance, so each is a scoped
+                <code class="code">SECURITY DEFINER</code> function doing one
+                indexed match on a 256-bit secret.
+              </dd>
+            </div>
+            <div class="creed__item">
+              <dt class="creed__k">Secret handling</dt>
+              <dd class="creed__v">
+                <b>Shown once, stored as a hash.</b> Secrets never reach an audit
+                entry or a log line. Request logs omit bodies, query strings and
+                the <code class="code">Authorization</code> header entirely.
+              </dd>
+            </div>
+            <div class="creed__item">
+              <dt class="creed__k">Browser surface</dt>
+              <dd class="creed__v">
+                <b>Locked down as tightly as the API.</b> A strict
+                <code class="code">Content-Security-Policy</code>, frame denial,
+                nosniff, referrer and permissions policy on every response. HSTS
+                over TLS. CORS is off by default and has no wildcard mode, since
+                responses carry credentials.
+              </dd>
+            </div>
+          </dl>
+        </div>
+      </section>
+
+      <!-- ══════════════════════ Developer experience ═══════════════════ -->
+      <section class="band band--alt" id="dx">
+        <div class="ld-shell">
+          <header class="sec sec--center reveal">
+            <p class="kicker">Developer experience</p>
+            <h2 class="sec__title">One request creates the organization</h2>
+            <p class="sec__sub">
+              An owner, a tenant, five roles and their permission sets, in one
+              transaction. Every response uses the same envelope, and
+              <code class="code">meta.request_id</code> matches the response
+              header and the server log line.
+            </p>
+          </header>
+
+          <div class="code-card reveal">
+            <div class="code-card__head">
+              <div class="tabs" role="tablist" aria-label="Example language">
+                <button class="tab" type="button" role="tab" id="tab-curl" aria-controls="panel-curl" aria-selected="true">cURL</button>
+                <button class="tab" type="button" role="tab" id="tab-go" aria-controls="panel-go" aria-selected="false">Go</button>
+                <button class="tab" type="button" role="tab" id="tab-ts" aria-controls="panel-ts" aria-selected="false">TypeScript</button>
+              </div>
+              <button class="icon-btn code-card__copy" type="button" id="code-copy" aria-label="Copy example to clipboard">
+                <svg class="icon icon--sm" aria-hidden="true" focusable="false"><use href="#i-copy"></use></svg>
+              </button>
+            </div>
+
+            <div class="code-card__panel" role="tabpanel" id="panel-curl" aria-labelledby="tab-curl">
+<pre class="code-card__pre"><code>curl -X POST https://your-host/api/v1/auth/register \
+  -H <span class="tk-s">'Content-Type: application/json'</span> \
+  -d <span class="tk-s">'{
+    "tenant_name": "Acme Inc",
+    "tenant_slug": "acme",
+    "email":       "ada@acme.com",
+    "password":    "supersecret123",
+    "full_name":   "Ada Lovelace"
+  }'</span>
+
+<span class="tk-c"># → 201 { success, data: { tenant, user, tokens }, meta }</span></code></pre>
+            </div>
+
+            <div class="code-card__panel" role="tabpanel" id="panel-go" aria-labelledby="tab-go" hidden>
+<pre class="code-card__pre"><code><span class="tk-c">// Every tenant-scoped read goes through txscope, which is the</span>
+<span class="tk-c">// only place app.tenant_id is ever set.</span>
+<span class="tk-k">func</span> (r *Repository) List(ctx context.Context) ([]Project, <span class="tk-k">error</span>) {
+    <span class="tk-k">var</span> out []Project
+    err := txscope.WithTenantTx(ctx, r.db, <span class="tk-k">func</span>(tx *gorm.DB) <span class="tk-k">error</span> {
+        <span class="tk-c">// No tenant predicate. The policy adds it.</span>
+        <span class="tk-k">return</span> tx.Where(<span class="tk-s">"deleted_at IS NULL"</span>).Find(&amp;out).Error
+    })
+    <span class="tk-k">return</span> out, err
+}</code></pre>
+            </div>
+
+            <div class="code-card__panel" role="tabpanel" id="panel-ts" aria-labelledby="tab-ts" hidden>
+<pre class="code-card__pre"><code><span class="tk-k">const</span> res = <span class="tk-k">await</span> fetch(<span class="tk-s">"/api/v1/projects"</span>, {
+  headers: { Authorization: <span class="tk-s">`Bearer ${accessToken}`</span> },
+});
+
+<span class="tk-k">const</span> { success, data, meta } = <span class="tk-k">await</span> res.json();
+
+<span class="tk-c">// meta.request_id === res.headers.get("X-Request-ID")</span>
+<span class="tk-c">// and matches the server log line for this request.</span></code></pre>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ═══════════════════════════ Pricing ═══════════════════════════ -->
+      <section class="band" id="pricing">
+        <div class="ld-shell">
+          <header class="sec sec--center reveal">
+            <p class="kicker">Pricing</p>
+            <h2 class="sec__title">The plan catalog, read from the live API</h2>
+            <p class="sec__sub">
+              These cards are not written into this page. They are fetched from
+              <code class="code">GET /api/v1/billing/plans</code> — the same
+              public endpoint your own client would call — so the limits shown
+              here are the limits the server actually enforces.
+            </p>
+          </header>
+
+          <div class="plans" id="plans" aria-live="polite">
+            <!-- Skeletons, replaced by landing.js. Three, because that is how
+                 many plans the schema seeds; a count that matches avoids a
+                 layout shift when the real cards land. -->
+            <div class="plan plan--skel"><span class="skel skel--title"></span><span class="skel skel--price"></span><span class="skel"></span><span class="skel"></span><span class="skel"></span></div>
+            <div class="plan plan--skel"><span class="skel skel--title"></span><span class="skel skel--price"></span><span class="skel"></span><span class="skel"></span><span class="skel"></span></div>
+            <div class="plan plan--skel"><span class="skel skel--title"></span><span class="skel skel--price"></span><span class="skel"></span><span class="skel"></span><span class="skel"></span></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ═════════════════════════════ FAQ ═════════════════════════════ -->
+      <section class="band band--alt" id="faq">
+        <div class="ld-shell faq-split">
+          <header class="sec reveal">
+            <p class="kicker">FAQ</p>
+            <h2 class="sec__title">The questions a reviewer asks</h2>
+          </header>
+
+          <!--
+            <details> rather than a JS accordion: it is keyboard operable,
+            announced correctly, findable by in-page search when closed in
+            supporting browsers, and works before any script runs.
+          -->
+          <div class="faq reveal">
+            <details class="qa">
+              <summary class="qa__q">
+                Is row-level security not a performance problem?
+                <svg class="icon icon--sm qa__chev" aria-hidden="true" focusable="false"><use href="#i-arrow-right"></use></svg>
+              </summary>
+              <div class="qa__a">
+                <p>
+                  The policy compiles into the query plan as an ordinary
+                  predicate on an indexed column, which is the same work the
+                  hand-written <code class="code">WHERE tenant_id</code> was
+                  doing. What it removes is the case where a developer forgets
+                  it. The cost that does exist is one
+                  <code class="code">set_config</code> per transaction.
+                </p>
+              </div>
+            </details>
+            <details class="qa">
+              <summary class="qa__q">
+                What happens on managed Postgres, where I own the tables?
+                <svg class="icon icon--sm qa__chev" aria-hidden="true" focusable="false"><use href="#i-arrow-right"></use></svg>
+              </summary>
+              <div class="qa__a">
+                <p>
+                  A table owner normally bypasses its own policies, which would
+                  silently disable isolation on exactly that kind of deployment.
+                  Every tenant-scoped table is therefore declared
+                  <code class="code">FORCE ROW LEVEL SECURITY</code>, which
+                  applies the policy to the owner too. A new tenant-scoped table
+                  needs both <code class="code">ENABLE</code> and
+                  <code class="code">FORCE</code>.
+                </p>
+              </div>
+            </details>
+            <details class="qa">
+              <summary class="qa__q">
+                Can an API key escalate its own privileges?
+                <svg class="icon icon--sm qa__chev" aria-hidden="true" focusable="false"><use href="#i-arrow-right"></use></svg>
+              </summary>
+              <div class="qa__a">
+                <p>
+                  No. A key authorizes purely from its own scope list; its
+                  creator is recorded for attribution and never consulted for
+                  authority. <code class="code">role:manage</code> and
+                  <code class="code">org:manage</code> cannot be granted to a key
+                  at all, and keys are blocked from minting keys or changing
+                  passwords.
+                </p>
+              </div>
+            </details>
+            <details class="qa">
+              <summary class="qa__q">
+                Why is there no email being sent yet?
+                <svg class="icon icon--sm qa__chev" aria-hidden="true" focusable="false"><use href="#i-arrow-right"></use></svg>
+              </summary>
+              <div class="qa__a">
+                <p>
+                  Invitation, reset and verification tokens are published as
+                  domain events, but no transport is wired up — so this is stated
+                  plainly rather than implied. Until one is, the dashboard
+                  surfaces a new invite link directly so the flow is usable.
+                  Kafka publishing, Redis caching and S3 uploads are the same
+                  shape: interfaces that degrade to no-ops.
+                </p>
+              </div>
+            </details>
+            <details class="qa">
+              <summary class="qa__q">
+                How is the frontend built?
+                <svg class="icon icon--sm qa__chev" aria-hidden="true" focusable="false"><use href="#i-arrow-right"></use></svg>
+              </summary>
+              <div class="qa__a">
+                <p>
+                  It is not built. There is no bundler, no framework and no
+                  runtime dependency: the dashboard is embedded in the binary and
+                  served from the same origin as the API, which is why there is
+                  no CORS configuration to get wrong. Every DOM node is created
+                  through a helper that assigns text via
+                  <code class="code">textContent</code>, so tenant-supplied names
+                  cannot become stored XSS.
+                </p>
+              </div>
+            </details>
+            <details class="qa">
+              <summary class="qa__q">
+                What is deliberately not here?
+                <svg class="icon icon--sm qa__chev" aria-hidden="true" focusable="false"><use href="#i-arrow-right"></use></svg>
+              </summary>
+              <div class="qa__a">
+                <p>
+                  Email delivery, event publishing, caching and file storage, as
+                  above. Two-factor authentication is schema-ready but not
+                  implemented. There is no billing provider integration — the
+                  plan catalog and quota enforcement are real, the card is not.
+                </p>
+              </div>
+            </details>
+          </div>
+        </div>
+      </section>
+
+      <!-- ═══════════════════════════ Close ═════════════════════════════ -->
+      <section class="close-band">
+        <div class="ld-shell close reveal">
+          <h2 class="close__title">The organization layer is done.</h2>
+          <p class="close__sub">
+            Create a tenant and its first owner in one request, sign in to the
+            workspace, and get back to the product you actually set out to
+            build.
+          </p>
+          <div class="close__cta">
+            <a class="btn btn--primary btn--lg" href="/app">
+              Start building
+              <svg class="icon icon--sm" aria-hidden="true" focusable="false"><use href="#i-arrow-right"></use></svg>
+            </a>
+            <a class="btn btn--secondary btn--lg" href="#lifecycle">Read the isolation model</a>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <!-- ════════════════════════════ Footer ═══════════════════════════ -->
+    <footer class="ld-foot">
+      <div class="ld-shell ld-foot__grid">
+        <div class="ld-foot__brand">
+          <span class="ld-brand ld-brand--sm">
+            <img class="logo" src="/assets/brand/logo-mark.svg" width="30" height="30" alt="" />
+            <span class="logo__word">Tenancy</span>
+          </span>
+          <p class="ld-foot__text">
+            Multi-tenant SaaS foundation. One Go binary, one PostgreSQL
+            database, isolation the database enforces.
+          </p>
+        </div>
+
+        <nav class="ld-foot__col" aria-label="Product">
+          <h2 class="ld-foot__h">Product</h2>
+          <a href="#lifecycle">Isolation model</a>
+          <a href="#architecture">Architecture</a>
+          <a href="#capabilities">Features</a>
+          <a href="#pricing">Pricing</a>
+        </nav>
+
+        <nav class="ld-foot__col" aria-label="Engineering">
+          <h2 class="ld-foot__h">Engineering</h2>
+          <a href="#security">Security model</a>
+          <a href="#dx">API shape</a>
+          <a href="#faq">FAQ</a>
+        </nav>
+
+        <nav class="ld-foot__col" aria-label="Workspace">
+          <h2 class="ld-foot__h">Workspace</h2>
+          <a href="/app">Open the dashboard</a>
+          <a href="/app">Sign in</a>
+          <a href="/health">API health</a>
+        </nav>
+      </div>
+    </footer>
+  </body>
+</html>
