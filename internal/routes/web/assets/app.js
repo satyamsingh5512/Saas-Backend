@@ -33,6 +33,11 @@
     route: "overview",
   };
 
+  let signedOut = false;
+  // Changes only when the authenticated identity is replaced or cleared. Access
+  // token rotation stays within an epoch, so same-session 401s may singleflight.
+  let sessionEpoch = 0;
+
   // sessionStorage, not localStorage: the token dies with the tab. A durable
   // cross-device session needs HttpOnly cookies issued by the API, which this
   // client deliberately does not imitate with JS-readable storage.
@@ -43,6 +48,7 @@
       } catch (_) { /* storage unavailable: session stays in memory */ }
     },
     load() {
+      sessionEpoch += 1;
       try {
         const raw = sessionStorage.getItem(SESSION_KEY);
         if (!raw) return false;
@@ -220,6 +226,41 @@
     setTimeout(() => playExit(node, EXIT.toast, () => node.remove()), kind === "err" ? 7000 : 4500);
   }
 
+  // BUTTON_BUSY_BEGIN
+  function pendingButtonLabel(label) {
+    if (label.startsWith("Sign in")) return "Signing in…";
+    const first = label.split(/\s+/)[0];
+    const verbs = {
+      Save: "Saving…", Create: "Creating…", Send: "Sending…", Add: "Adding…",
+      Change: "Changing…", Accept: "Accepting…", Retry: "Retrying…", Reload: "Loading…",
+      Delete: "Deleting…", Revoke: "Revoking…", Cancel: "Canceling…", Switch: "Switching…",
+      Remove: "Removing…",
+    };
+    return verbs[first] || "Working…";
+  }
+
+  /** Replaces a button's children while pending and restores the exact nodes. */
+  function setButtonBusy(button, label) {
+    const children = Array.from(button.childNodes);
+    const wasDisabled = button.disabled;
+    const previousBusy = button.getAttribute("aria-busy");
+    let restored = false;
+
+    button.disabled = true;
+    button.setAttribute("aria-busy", "true");
+    clear(button).append(icon("refresh", "icon spinner"), label);
+
+    return () => {
+      if (restored) return;
+      restored = true;
+      clear(button).append(...children);
+      button.disabled = wasDisabled;
+      if (previousBusy === null) button.removeAttribute("aria-busy");
+      else button.setAttribute("aria-busy", previousBusy);
+    };
+  }
+  // BUTTON_BUSY_END
+
   /* ─────────────────────────────── API ────────────────────────────────── */
 
   class ApiError extends Error {
@@ -230,26 +271,80 @@
     }
   }
 
-  async function call(path, opts = {}, retried = false) {
-    const { method = "GET", body, auth = true, raw = false } = opts;
+  const isAbort = (err) => Boolean(err && err.name === "AbortError");
+  const isAuthoritativeAuthError = (err) => Boolean(err && err.status === 401);
 
-    const headers = { Accept: "application/json" };
+  // ASYNC_ERROR_VISIBILITY_BEGIN
+  function shouldSurfaceAsyncError(err, ownership = null) {
+    return !isAbort(err) && (!ownership || ownership.owns());
+  }
+  // ASYNC_ERROR_VISIBILITY_END
+
+  // REFRESH_SINGLEFLIGHT_BEGIN
+  function createSingleflight(task) {
+    let inFlight = null;
+    return function run() {
+      if (!inFlight) {
+        inFlight = Promise.resolve().then(task).finally(() => { inFlight = null; });
+      }
+      return inFlight;
+    };
+  }
+  // REFRESH_SINGLEFLIGHT_END
+
+  // AUTH_REQUEST_BEGIN
+  function staleSessionError() {
+    const err = new Error("The session changed while this request was in flight.");
+    err.name = "AbortError";
+    return err;
+  }
+
+  async function call(path, opts = {}, retried = false, requestEpoch = sessionEpoch) {
+    const { method = "GET", body, auth = true, raw = false, signal, headers: extraHeaders = {} } = opts;
+
+    const headers = { Accept: "application/json", ...extraHeaders };
     if (body !== undefined) headers["Content-Type"] = "application/json";
-    if (auth && state.access) headers.Authorization = `Bearer ${state.access}`;
+    const accessUsed = auth ? state.access : null;
+    if (accessUsed) headers.Authorization = `Bearer ${accessUsed}`;
 
     let res;
     try {
-      res = await fetch(API + path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
-    } catch (_) {
+      res = await fetch(API + path, { method, headers, signal, body: body === undefined ? undefined : JSON.stringify(body) });
+    } catch (err) {
+      if (isAbort(err)) throw err;
       throw new ApiError(0, "NETWORK", "Cannot reach the server.");
     }
 
-    // Rotate once on 401, then give up. A refresh that itself fails means the
-    // session is genuinely dead and retrying would spin.
+    // Never replay or interpret a response under a replacement login. This is
+    // especially important for POST bodies: an old-session 401 must not retry
+    // the mutation with a newly signed-in user's Bearer token.
+    if (auth && requestEpoch !== sessionEpoch) throw staleSessionError();
+
+    // Each caller retries at most once. If another caller already rotated while
+    // this request was in flight, retry with that token without rotating again.
     if (res.status === 401 && auth && !retried && state.refresh) {
-      if (await rotate()) return call(path, opts, true);
+      if (accessUsed && accessUsed !== state.access) return call(path, opts, true, requestEpoch);
+      const refreshUsed = state.refresh;
+      try {
+        await rotate();
+      } catch (err) {
+        // A refresh result belongs only to the epoch and credential that began
+        // it. A delayed old refresh must never clear a replacement login.
+        if (requestEpoch !== sessionEpoch || state.refresh !== refreshUsed) throw staleSessionError();
+        // A network/5xx refresh failure is not proof that the credential died.
+        // Keep it for a later retry; only this session's refresh-endpoint 401 is final.
+        if (isAuthoritativeAuthError(err)) {
+          signOut(true);
+          throw new ApiError(401, "UNAUTHORIZED", "Your session expired. Sign in again.");
+        }
+        throw err;
+      }
+      if (requestEpoch !== sessionEpoch) throw staleSessionError();
+      return call(path, opts, true, requestEpoch);
+    }
+    if (res.status === 401 && auth && (retried || !state.refresh)) {
+      if (requestEpoch !== sessionEpoch) throw staleSessionError();
       signOut(true);
-      throw new ApiError(401, "UNAUTHORIZED", "Your session expired. Sign in again.");
     }
 
     const payload = res.status === 204 ? null : await res.json().catch(() => null);
@@ -264,38 +359,50 @@
     return payload ? payload.data : null;
   }
 
-  const list = (path) => call(path, { raw: true });
+  const list = (path, opts = {}) => call(path, { ...opts, raw: true });
 
-  async function rotate() {
-    try {
-      const d = await call("/auth/refresh", { method: "POST", body: { refresh_token: state.refresh }, auth: false }, true);
-      state.access = d.access_token;
-      state.refresh = d.refresh_token;
-      session.save();
-      return true;
-    } catch (_) { return false; }
-  }
+  const rotate = createSingleflight(async () => {
+    const rotationEpoch = sessionEpoch;
+    const refreshUsed = state.refresh;
+    const d = await call("/auth/refresh", { method: "POST", body: { refresh_token: refreshUsed }, auth: false }, true, rotationEpoch);
+    if (rotationEpoch !== sessionEpoch || state.refresh !== refreshUsed) throw staleSessionError();
+    state.access = d.access_token;
+    state.refresh = d.refresh_token;
+    session.save();
+    return d;
+  });
+  // AUTH_REQUEST_END
 
   const can = (code) => state.perms.has(code);
 
   /* ─────────────────────────────── Theme ──────────────────────────────── */
 
   const theme = {
+    // Dark is the default, so an empty store means dark rather than "system".
+    // "system" is stored explicitly; see the note in theme.js, which has to
+    // resolve the same three states before first paint.
     current() {
-      try { return localStorage.getItem(THEME_KEY) || "system"; } catch (_) { return "system"; }
+      try { return localStorage.getItem(THEME_KEY) || "dark"; } catch (_) { return "dark"; }
+    },
+    // The raw stored value, or null when this device has never chosen. current()
+    // cannot answer that any more: it resolves an empty store to "dark", which
+    // is now indistinguishable from an explicit dark choice. loadProfile() needs
+    // the distinction to know whether the server preference may take over.
+    stored() {
+      try { return localStorage.getItem(THEME_KEY); } catch (_) { return null; }
     },
     apply(mode) {
       const root = document.documentElement;
       root.classList.remove("theme-dark", "theme-light");
       if (mode === "dark" || mode === "light") root.classList.add(`theme-${mode}`);
       try {
-        if (mode === "system") localStorage.removeItem(THEME_KEY);
-        else localStorage.setItem(THEME_KEY, mode);
+        localStorage.setItem(THEME_KEY, mode);
       } catch (_) { /* storage blocked */ }
     },
-    // Cycles system → light → dark so all three are reachable from one control.
+    // Cycles dark → light → system so all three are reachable from one control,
+    // starting from the default rather than passing through it.
     cycle() {
-      const order = ["system", "light", "dark"];
+      const order = ["dark", "light", "system"];
       const next = order[(order.indexOf(theme.current()) + 1) % order.length];
       theme.apply(next);
       toast(`Theme: ${next}`, "info");
@@ -309,20 +416,20 @@
 
   function closeModal() { dismiss(modal); }
 
-  function openModal({ title, desc, body, footer, wide = false }) {
+  function openModal({ title, desc, body, footer, wide = false, ownership = null }) {
+    const activeOwnership = ownership || actionOwner.begin();
+    if (!activeOwnership.owns()) return false;
     // A modal can be reopened while a previous dismissal is still animating —
     // most often by the palette, which runs a create action as it leaves. Without
     // this the pending timeout would close the modal that just opened.
     cancelExit(modal);
     modal.classList.toggle("modal--wide", wide);
-    clear(modal).append(
-      el("div", { class: "modal__head" },
-        el("div", {},
-          el("h2", { class: "modal__title", id: "modal-title", text: title }),
-          desc ? el("p", { class: "modal__desc", text: desc }) : null),
-        el("button", { class: "icon-btn", type: "button", "aria-label": "Close", onclick: closeModal }, icon("x"))),
-      body,
-      footer);
+    const head = el("div", { class: "modal__head" },
+      el("div", {},
+        el("h2", { class: "modal__title", id: "modal-title", text: title }),
+        desc ? el("p", { class: "modal__desc", text: desc }) : null),
+      el("button", { class: "icon-btn", type: "button", "aria-label": "Close", onclick: closeModal }, icon("x")));
+    clear(modal).append(...[head, body, footer].filter((region) => region !== null && region !== undefined && region !== false));
     if (!modal.open) modal.showModal();
     /* No `.btn--danger` here, deliberately. querySelector resolves in document
        order, and confirmModal passes no body, so a danger button was always the
@@ -332,45 +439,98 @@
        on the first focusable descendant: the header close button. */
     const focusable = modal.querySelector("input, select, textarea, .btn--primary");
     if (focusable) focusable.focus();
+    return true;
   }
 
   /* Mobile drawer. Module scope rather than local to wireShell() because route()
-     also has to close it — navigating from inside the drawer is the most common
-     way it gets dismissed, and that path used to hide the scrim in one frame
-     while the panel it was dimming slid out over 250ms. */
-  function openNav() {
+     also has to close it. In drawer mode it behaves like a modal surface while
+     retaining the existing aside, transition, and scrim. */
+  // DRAWER_LIFECYCLE_BEGIN
+  const drawerMedia = window.matchMedia("(max-width: 1024px)");
+  let navOpener = null;
+
+  const drawerFocusable = (sidebar) => Array.from(sidebar.querySelectorAll(
+    'a[href]:not([hidden]), button:not([disabled]):not([hidden]), input:not([disabled]):not([hidden]), select:not([disabled]):not([hidden]), textarea:not([disabled]):not([hidden]), [tabindex]:not([tabindex="-1"]):not([hidden])',
+  ));
+
+  function setDrawerBackgroundInert(inert) {
+    [$(".topbar"), host()].filter(Boolean).forEach((node) => {
+      node.inert = inert;
+      if (inert) node.setAttribute("inert", "");
+      else node.removeAttribute("inert");
+    });
+  }
+
+  function openNav(event) {
+    if (!drawerMedia.matches) return;
+    const sidebar = $("#sidebar");
     const scrim = $(".scrim");
+    navOpener = (event && event.currentTarget) || document.activeElement || $('.topbar__menu[data-nav="open"]');
     cancelExit(scrim);
     document.body.classList.add("nav-open");
     $$('[data-nav="open"]').forEach((b) => b.setAttribute("aria-expanded", "true"));
+    sidebar.setAttribute("role", "dialog");
+    sidebar.setAttribute("aria-modal", "true");
+    sidebar.setAttribute("aria-label", "Navigation");
+    setDrawerBackgroundInert(true);
     // Order matters: the fade-in is a keyframe animation, which only plays as the
-    // element goes from [hidden] to rendered, so unhiding has to be the last step.
+    // element goes from [hidden] to rendered, so unhiding precedes focus.
     scrim.hidden = false;
+    const current = sidebar.querySelector('.nav__item[aria-current="page"]:not([hidden])');
+    const first = drawerFocusable(sidebar)[0];
+    (current || first || sidebar).focus();
   }
 
-  function closeNav() {
+  function closeNav({ restoreFocus = true } = {}) {
+    const sidebar = $("#sidebar");
     const scrim = $(".scrim");
+    const wasOpen = document.body.classList.contains("nav-open");
     document.body.classList.remove("nav-open");
-    // route() calls this on every navigation, including the desktop case where
-    // the drawer was never open. Animating an already-hidden element would be a
-    // no-op that still delays `hidden = true` by 250ms, so bail out instead.
-    if (scrim.hidden) { cancelExit(scrim); return; }
     $$('[data-nav="open"]').forEach((b) => b.setAttribute("aria-expanded", "false"));
-    // The drawer is about to become visibility: hidden. If focus is still inside
-    // it — Escape pressed while tabbing the nav — it would be orphaned on <body>,
-    // so it goes back to the control that opened the drawer. Only in that case:
-    // a click on the scrim leaves focus where it already was.
-    const opener = $('.topbar__menu[data-nav="open"]');
-    if (opener && $("#sidebar").contains(document.activeElement)) opener.focus();
+    sidebar.removeAttribute("role");
+    sidebar.removeAttribute("aria-modal");
+    sidebar.removeAttribute("aria-label");
+    setDrawerBackgroundInert(false);
+
+    const opener = navOpener;
+    navOpener = null;
+    if (wasOpen && restoreFocus && opener && typeof opener.focus === "function") opener.focus();
+    // route() calls this on every navigation, including the desktop case where
+    // the drawer was never open. Avoid delaying an already-hidden scrim.
+    if (scrim.hidden) { cancelExit(scrim); return; }
     playExit(scrim, EXIT.scrim, () => { scrim.hidden = true; });
   }
+
+  function trapNavFocus(event) {
+    if (event.key !== "Tab" || !drawerMedia.matches || !document.body.classList.contains("nav-open") ||
+        document.querySelector("dialog[open]")) return false;
+    const sidebar = $("#sidebar");
+    const focusable = drawerFocusable(sidebar);
+    if (!focusable.length) { event.preventDefault(); sidebar.focus(); return true; }
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (!sidebar.contains(document.activeElement)) {
+      event.preventDefault();
+      (event.shiftKey ? last : first).focus();
+    } else if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
+    return true;
+  }
+  // DRAWER_LIFECYCLE_END
 
   /**
    * formModal renders a titled form. Fields are descriptors; onSubmit receives
    * the collected values and may throw an ApiError to surface an inline error.
    */
-  function formModal({ title, desc, submit, fields, onSubmit, danger = false, wide = false }) {
-    const alert = el("div", { class: "alert", role: "alert", hidden: true });
+  function formModal({ title, desc, submit, fields, onSubmit, danger = false, wide = false, submitWhenChanged = false, ownership = null }) {
+    const activeOwnership = ownership || actionOwner.begin();
+    if (!activeOwnership.owns()) return false;
+    const alert = el("div", { class: "alert", id: "modal-form-error", role: "alert", hidden: true });
     const reads = [];
     const body = el("div", { class: "modal__body" }, alert);
 
@@ -411,10 +571,17 @@
         if (f.value !== undefined && f.value !== null) control.value = f.value;
       }
 
+      if (!isPicker) {
+        if (f.required) control.required = true;
+        if (f.minlength !== undefined) control.minLength = f.minlength;
+        if (f.maxlength !== undefined) control.maxLength = f.maxlength;
+        if (f.hint) control.setAttribute("aria-describedby", `${id}-hint`);
+      }
+
       if (f.type === "checkbox") {
         body.append(el("div", { class: "check" }, control,
           el("div", {}, el("label", { class: "check__label", for: id, text: f.label }),
-            f.hint ? el("p", { class: "check__hint", text: f.hint }) : null)));
+            f.hint ? el("p", { class: "check__hint", id: `${id}-hint`, text: f.hint }) : null)));
       } else {
         body.append(el("div", { class: "field" },
           el("div", { class: "field__row" },
@@ -423,7 +590,7 @@
               : el("label", { class: "field__label", for: id, text: f.label }),
             f.optional ? el("span", { class: "field__optional", text: "optional" }) : null),
           control,
-          f.hint ? el("p", { class: "field__hint", text: f.hint }) : null));
+          f.hint ? el("p", { class: "field__hint", id: `${id}-hint`, text: f.hint }) : null));
       }
 
       reads.push({
@@ -436,41 +603,98 @@
       });
     }
 
-    const go = el("button", { class: `btn ${danger ? "btn--danger" : "btn--primary"}`, type: "button" }, submit);
-    go.addEventListener("click", async () => {
-      alert.hidden = true;
+    const readValues = () => {
       const values = {};
       for (const r of reads) values[r.name] = r.read();
-      go.disabled = true;
+      return values;
+    };
+    const initialValues = JSON.stringify(readValues());
+    const go = el("button", { class: `btn ${danger ? "btn--danger" : "btn--primary"}`, type: "submit" }, submit);
+    const syncSubmit = () => {
+      go.disabled = submitWhenChanged && JSON.stringify(readValues()) === initialValues;
+    };
+    if (submitWhenChanged) {
+      body.addEventListener("input", syncSubmit);
+      body.addEventListener("change", syncSubmit);
+      syncSubmit();
+    }
+    const footer = el("div", { class: "modal__foot" },
+      el("button", { class: "btn btn--secondary", type: "button", onclick: closeModal }, "Cancel"),
+      go);
+    const form = el("form", { class: "modal__form" }, body, footer);
+    const clearServerError = () => {
+      alert.hidden = true;
+      for (const control of form.querySelectorAll("input, select, textarea")) {
+        control.removeAttribute("aria-invalid");
+        const ids = (control.getAttribute("aria-describedby") || "").split(/\s+/).filter((id) => id && id !== alert.id);
+        if (ids.length) control.setAttribute("aria-describedby", ids.join(" "));
+        else control.removeAttribute("aria-describedby");
+      }
+    };
+    form.addEventListener("input", clearServerError);
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      clearServerError();
+      if (!form.checkValidity()) {
+        form.reportValidity();
+        return;
+      }
+      if (!activeOwnership.owns()) { closeModal(); return; }
+      const values = readValues();
+      const stopBusy = setButtonBusy(go, pendingButtonLabel(submit));
       try {
-        await onSubmit(values);
-        closeModal();
+        await onSubmit(values, activeOwnership);
+        if (activeOwnership.owns()) closeModal();
       } catch (err) {
+        if (!shouldSurfaceAsyncError(err, activeOwnership)) return;
         alert.textContent = err.message;
+        if (err.actionLabel && typeof err.onAction === "function") {
+          const action = el("button", { class: "btn btn--secondary btn--sm", type: "button" }, err.actionLabel);
+          action.addEventListener("click", async () => {
+            const stopBusy = setButtonBusy(action, pendingButtonLabel(err.actionLabel));
+            try {
+              await err.onAction();
+            } catch (actionErr) {
+              if (!shouldSurfaceAsyncError(actionErr, activeOwnership)) return;
+              alert.textContent = actionErr.message;
+              alert.hidden = false;
+            } finally {
+              stopBusy();
+            }
+          });
+          alert.append(el("p", { text: "Reload to review the latest grants before saving again." }), action);
+        }
+        const invalidValues = err.status === 400 || err.code === "VALIDATION";
+        for (const control of form.querySelectorAll("input, select, textarea")) {
+          if (invalidValues) control.setAttribute("aria-invalid", "true");
+          const described = control.getAttribute("aria-describedby");
+          control.setAttribute("aria-describedby", [described, alert.id].filter(Boolean).join(" "));
+        }
         alert.hidden = false;
       } finally {
-        go.disabled = false;
+        stopBusy();
+        syncSubmit();
       }
     });
 
-    openModal({
-      title, desc, wide, body,
-      footer: el("div", { class: "modal__foot" },
-        el("button", { class: "btn btn--secondary", type: "button", onclick: closeModal }, "Cancel"),
-        go),
-    });
+    return openModal({ title, desc, wide, body: form, ownership: activeOwnership });
   }
 
-  function confirmModal({ title, desc, confirm, onConfirm }) {
+  function confirmModal({ title, desc, confirm, onConfirm, ownership = null }) {
+    const activeOwnership = ownership || actionOwner.begin();
+    if (!activeOwnership.owns()) return false;
     const go = el("button", { class: "btn btn--danger", type: "button" }, confirm);
     go.addEventListener("click", async () => {
-      go.disabled = true;
+      const stopBusy = setButtonBusy(go, pendingButtonLabel(confirm));
       try {
-        await onConfirm();
-        closeModal();
+        await onConfirm(activeOwnership);
+        if (activeOwnership.owns()) closeModal();
       } catch (err) {
+        if (!shouldSurfaceAsyncError(err, activeOwnership)) return;
         toast(err.message, "err");
         closeModal();
+      } finally {
+        if (activeOwnership.owns()) stopBusy();
       }
     });
     openModal({
@@ -478,6 +702,7 @@
       footer: el("div", { class: "modal__foot" },
         el("button", { class: "btn btn--secondary", type: "button", onclick: closeModal }, "Cancel"),
         go),
+      ownership: activeOwnership,
     });
   }
 
@@ -500,6 +725,15 @@
       el("p", { class: "empty__title", text: title }),
       el("p", { class: "empty__text", text }),
       actions.filter(Boolean).length ? el("div", { class: "empty__actions" }, actions.filter(Boolean)) : null);
+  }
+
+  function inlineState(title, text, onRetry) {
+    return el("div", { class: "inline-state", role: "status" },
+      icon("alert"),
+      el("div", { class: "inline-state__copy" },
+        el("p", { class: "inline-state__title", text: title }),
+        el("p", { class: "inline-state__text", text })),
+      onRetry ? el("button", { class: "btn btn--secondary btn--sm", type: "button", onclick: onRetry }, "Retry") : null);
   }
 
   function kpi({ label, value, glyph, foot, meter }) {
@@ -569,15 +803,25 @@
     return wrap;
   }
 
+  function pageSkeleton({ title, desc, narrow = false, action = null, content }) {
+    const actionFootprint = action
+      ? el("span", { class: "btn btn--secondary", "aria-hidden": "true" },
+        el("span", { class: "skel skel--icon" }),
+        el("span", { class: "skel skel--text skel--action", text: action }))
+      : null;
+    return el("div", { class: `page${narrow ? " page--narrow" : ""}` },
+      pageHead(title, desc, actionFootprint), content);
+  }
+
   function pager(meta, onPage) {
-    if (!meta || meta.total_pages <= 1) return null;
-    const from = (meta.page - 1) * meta.page_size + 1;
+    if (!meta) return null;
+    const from = meta.total === 0 ? 0 : (meta.page - 1) * meta.page_size + 1;
     const to = Math.min(meta.page * meta.page_size, meta.total);
     return el("div", { class: "pager" },
       el("span", { text: `${from}–${to} of ${meta.total}` }),
-      el("div", { class: "pager__btns" },
+      meta.total_pages > 1 ? el("div", { class: "pager__btns" },
         el("button", { class: "btn btn--secondary btn--sm", type: "button", disabled: meta.page <= 1, dataset: { focusKey: "pager-prev" }, onclick: () => onPage(meta.page - 1) }, "Previous"),
-        el("button", { class: "btn btn--secondary btn--sm", type: "button", disabled: meta.page >= meta.total_pages, dataset: { focusKey: "pager-next" }, onclick: () => onPage(meta.page + 1) }, "Next")));
+        el("button", { class: "btn btn--secondary btn--sm", type: "button", disabled: meta.page >= meta.total_pages, dataset: { focusKey: "pager-next" }, onclick: () => onPage(meta.page + 1) }, "Next")) : null);
   }
 
   function pageHead(title, desc, ...actions) {
@@ -637,6 +881,72 @@
   const host = () => $("#page");
   const render = (node) => clear(host()).append(node);
 
+  // VIEW_OWNERSHIP_BEGIN
+  function createGenerationOwner() {
+    let generation = 0;
+    let controller = null;
+    return {
+      begin() {
+        if (controller) controller.abort();
+        controller = new AbortController();
+        const mine = ++generation;
+        return { generation: mine, signal: controller.signal, owns: () => mine === generation };
+      },
+      invalidate() {
+        generation += 1;
+        if (controller) controller.abort();
+        controller = null;
+      },
+    };
+  }
+  // VIEW_OWNERSHIP_END
+
+  // HONEST_LOAD_BEGIN
+  async function honestLoad(allowed, loader) {
+    if (!allowed) return { kind: "forbidden" };
+    try {
+      return { kind: "ready", value: await loader() };
+    } catch (error) {
+      if (error && error.name === "AbortError") throw error;
+      return { kind: "error", error };
+    }
+  }
+  // HONEST_LOAD_END
+
+  // Picker datasets must be complete. Follow pagination up to 1,000 records;
+  // beyond that explicit failure is safer than a silently incomplete choice.
+  // FETCH_ALL_PAGES_BEGIN
+  async function fetchAllPages(path, { signal, cap = 1000, fetchPage = list } = {}) {
+    const items = [];
+    let page = 1;
+    let totalPages = 1;
+    do {
+      const separator = path.includes("?") ? "&" : "?";
+      const result = await fetchPage(`${path}${separator}page=${page}&page_size=100`, { signal });
+      const meta = result && result.page;
+      if (!meta || !Number.isInteger(meta.page) || !Number.isInteger(meta.total_pages) || typeof meta.total !== "number") {
+        throw new Error("The server did not return pagination metadata required to load the complete list.");
+      }
+      if (meta.total > cap) {
+        throw new Error(`This picker contains more than ${cap} records. Narrow the dataset before continuing.`);
+      }
+      items.push(...result.items);
+      if (items.length > cap) {
+        throw new Error(`This picker contains more than ${cap} records. Narrow the dataset before continuing.`);
+      }
+      totalPages = meta.total_pages;
+      page += 1;
+    } while (page <= totalPages);
+    return { items, total: items.length };
+  }
+  // FETCH_ALL_PAGES_END
+
+  const viewOwner = createGenerationOwner();
+  // Async action loaders and their resulting modal share an owner distinct from
+  // route rendering. Navigation, sign-out, or a newer action invalidates them.
+  const actionOwner = createGenerationOwner();
+  const refreshRoute = (name) => { if (state.route === name) pages[name](); };
+
   /* ── Focus survival ──
      Every list control in this file re-renders the whole page: a filter, a page
      button, and a row action all end in `pages.X()`, which clears #page and
@@ -683,7 +993,8 @@
     }
   }
 
-  async function view(skeleton, load, build) {
+  async function view(descriptor, load, build) {
+    const ownership = viewOwner.begin();
     const snap = captureFocus();
     const page = host();
     // The skeleton spans carry no text, so without this the region reads as
@@ -691,15 +1002,18 @@
     // route announcer already names the view, and a second live region firing
     // per load would talk over it.
     page.setAttribute("aria-busy", "true");
-    render(el("div", { class: "page" }, skeleton));
+    render(pageSkeleton(descriptor));
     try {
-      const data = await load();
+      const data = await load(ownership.signal);
+      if (!ownership.owns()) return;
       render(build(data));
     } catch (err) {
-      render(el("div", { class: "page" }, el("div", { class: "card" },
+      if (!ownership.owns() || isAbort(err)) return;
+      render(el("div", { class: `page${descriptor.narrow ? " page--narrow" : ""}` }, el("div", { class: "card" },
         emptyState("alert", "Could not load this view", err.message,
           el("button", { class: "btn btn--secondary", type: "button", onclick: () => route() }, icon("refresh"), "Try again")))));
     } finally {
+      if (!ownership.owns()) return;
       page.removeAttribute("aria-busy");
       // Also runs on the error path, where nothing carries a focus key and this
       // is a no-op — cheaper than duplicating the call in both branches.
@@ -710,10 +1024,10 @@
   const feedGlyph = (t) => (t === "project" ? "folder" : t === "team" ? "team" : t === "organization" ? "building" : "users");
 
   function feedList(events) {
-    const wrap = el("div", { class: "feed" });
+    const wrap = el("ul", { class: "feed" });
     for (const e of events) {
       const name = (e.metadata && e.metadata.name) || "";
-      wrap.append(el("div", { class: "feed__item" },
+      wrap.append(el("li", { class: "feed__item" },
         el("span", { class: "feed__icon" }, icon(feedGlyph(e.target_type))),
         el("div", { class: "feed__body" },
           el("p", { class: "feed__title", text: `${fmt.title(e.target_type)} ${e.verb}` }),
@@ -724,16 +1038,18 @@
 
   /* --- Overview --- */
 
-  pages.overview = () => view(
-    el("div", { class: "stack" }, kpiSkeleton(), el("div", { class: "card" }, tableSkeleton(3, 4))),
-    async () => {
-      // Both panels are permission-gated, so a Member sees the page without them
-      // rather than an error.
+  pages.overview = () => view({
+    title: `Good to see you, ${(state.profile.full_name || "there").split(" ")[0]}`,
+    desc: `${state.profile.organization.name} · you hold the ${state.profile.roles[0] || "member"} role.`,
+    action: "Refresh",
+    content: el("div", { class: "stack" }, kpiSkeleton(), el("div", { class: "card" }, tableSkeleton(3, 4))),
+  },
+    async (signal) => {
       const [usage, activity] = await Promise.all([
-        can("billing:view") ? call("/billing/usage").catch(() => null) : null,
-        can("org:view") ? list("/activity?page_size=7").catch(() => ({ items: [] })) : { items: [] },
+        honestLoad(can("billing:view"), () => call("/billing/usage", { signal })),
+        honestLoad(can("org:view"), () => list("/activity?page_size=7", { signal })),
       ]);
-      return { usage, activity: activity.items };
+      return { usage, activity };
     },
     ({ usage, activity }) => {
       const org = state.profile.organization;
@@ -744,12 +1060,13 @@
           el("button", { class: "btn btn--secondary", type: "button", onclick: () => route() }, icon("refresh"), "Refresh")));
 
       const kpis = el("div", { class: "kpis" });
-      if (usage) {
+      if (usage.kind === "ready") {
+        const usageData = usage.value;
         kpis.append(
-          kpi({ label: "Seats", value: usage.seats, glyph: "users", meter: { used: usage.seats, max: usage.max_seats } }),
-          kpi({ label: "Projects", value: usage.projects, glyph: "folder", meter: { used: usage.projects, max: usage.max_projects } }),
-          kpi({ label: "Teams", value: usage.teams, glyph: "team", foot: "No plan limit" }),
-          kpi({ label: "Plan", value: fmt.title(usage.plan_code), glyph: "card", foot: "Current subscription" }));
+          kpi({ label: "Seats", value: usageData.seats, glyph: "users", meter: { used: usageData.seats, max: usageData.max_seats } }),
+          kpi({ label: "Projects", value: usageData.projects, glyph: "folder", meter: { used: usageData.projects, max: usageData.max_projects } }),
+          kpi({ label: "Teams", value: usageData.teams, glyph: "team", foot: "No plan limit" }),
+          kpi({ label: "Plan", value: fmt.title(usageData.plan_code), glyph: "card", foot: "Current subscription" }));
       } else {
         kpis.append(
           kpi({ label: "Workspace", value: org.slug, glyph: "building", foot: "Tenant identifier" }),
@@ -758,15 +1075,24 @@
           kpi({ label: "Member since", value: fmt.date(state.profile.created_at), glyph: "clock", foot: "Account created" }));
       }
 
-      const feed = el("section", { class: "card" },
-        el("div", { class: "card__head" },
-          el("div", {}, el("h2", { class: "card__title", text: "Recent activity" }),
-            el("p", { class: "card__sub", text: "What changed across the workspace" })),
-          can("audit:view") ? el("a", { class: "link", href: "#/audit" }, "Audit log") : null));
+      let feed = null;
+      if (activity.kind !== "forbidden") {
+        feed = el("section", { class: "card" },
+          el("div", { class: "card__head" },
+            el("div", {}, el("h2", { class: "card__title", text: "Recent activity" }),
+              el("p", { class: "card__sub", text: activity.kind === "ready" && activity.value.page
+                ? `Showing latest ${activity.value.items.length} of ${activity.value.page.total}`
+                : "What changed across the workspace" })),
+            can("audit:view") ? el("a", { class: "link", href: "#/audit" }, "Audit log") : null));
 
-      feed.append(activity.length
-        ? el("div", { class: "card__body" }, feedList(activity))
-        : emptyState("activity", "No activity yet", "Create a project or invite a teammate and it will appear here."));
+        if (activity.kind === "error") {
+          feed.append(el("div", { class: "card__body" }, inlineState("Activity unavailable", activity.error.message, () => refreshRoute("overview"))));
+        } else {
+          feed.append(activity.value.items.length
+            ? el("div", { class: "card__body" }, feedList(activity.value.items))
+            : emptyState("activity", "No activity yet", "Create a project or invite a teammate and it will appear here."));
+        }
+      }
 
       const detail = el("section", { class: "card" },
         el("div", { class: "card__head" }, el("div", {}, el("h2", { class: "card__title", text: "Session" }))),
@@ -779,48 +1105,68 @@
             el("div", {}, el("dt", { text: "Email verified" }), el("dd", {}, state.profile.email_verified_at ? badge("Verified", "ok") : badge("Unverified", "warn"))),
             el("div", {}, el("dt", { text: "Permissions" }), el("dd", { text: String(state.profile.permissions.length) })))));
 
-      page.append(el("div", { class: "stack" }, kpis, el("div", { class: "split" }, feed, detail)));
+      const overviewStack = el("div", { class: "stack" }, kpis);
+      if (usage.kind === "error") {
+        overviewStack.append(el("section", { class: "card" }, el("div", { class: "card__body" },
+          inlineState("Usage unavailable", usage.error.message, () => refreshRoute("overview")))));
+      }
+      overviewStack.append(el("div", { class: "split" }, feed, detail));
+      page.append(overviewStack);
       return page;
     });
 
   /* --- Projects --- */
 
+  // COLLECTION_CREATE_ACTIONS_BEGIN
+  function collectionCreateActions(hasItems, filtered, allowed, create) {
+    return {
+      header: allowed && hasItems ? create() : null,
+      empty: allowed && !hasItems && !filtered ? create() : null,
+    };
+  }
+  // COLLECTION_CREATE_ACTIONS_END
+
   const q = {
     projects: { page: 1, search: "", status: "" },
     teams: { page: 1, search: "" },
-    members: { page: 1 },
+    members: { page: 1, invitePage: 1 },
+    apiKeys: { page: 1 },
+    notifications: { page: 1 },
     audit: { page: 1, action: "" },
   };
 
-  pages.projects = () => view(
-    el("div", { class: "card" }, tableSkeleton(6)),
-    async () => {
+  pages.projects = () => view({
+    title: "Projects", desc: "Group work into projects and control who can access each one.",
+    action: can("project:create") ? "New project" : null,
+    content: el("div", { class: "card" }, tableSkeleton(6)),
+  },
+    async (signal) => {
       const p = new URLSearchParams({ page: String(q.projects.page), page_size: "10" });
       if (q.projects.search) p.set("search", q.projects.search);
       if (q.projects.status) p.set("status", q.projects.status);
       const [projects, teams] = await Promise.all([
-        list(`/projects?${p}`),
-        can("team:view") ? list("/teams?page_size=100").catch(() => ({ items: [] })) : { items: [] },
+        list(`/projects?${p}`, { signal }),
+        can("team:view") ? fetchAllPages("/teams", { signal }) : { items: [] },
       ]);
       return { projects, teams: teams.items };
     },
     ({ projects, teams }) => {
+      const create = () => el("button", { class: "btn btn--primary", type: "button", onclick: () => projectForm(null, teams) }, icon("plus"), "New project");
+      const createActions = collectionCreateActions(projects.items.length > 0, Boolean(q.projects.search || q.projects.status), can("project:create"), create);
       const page = el("div", { class: "page" },
-        pageHead("Projects", "Group work into projects and control who can access each one.",
-          can("project:create") ? el("button", { class: "btn btn--primary", type: "button", onclick: () => projectForm(null, teams) }, icon("plus"), "New project") : null));
+        pageHead("Projects", "Group work into projects and control who can access each one.", createActions.header));
 
       const card = el("section", { class: "card" },
         el("div", { class: "toolbar" },
-          searchBox(q.projects.search, "Search projects…", (v) => { q.projects.search = v; q.projects.page = 1; pages.projects(); }),
+          searchBox(q.projects.search, "Search projects…", (v) => { q.projects.search = v; q.projects.page = 1; refreshRoute("projects"); }),
           segment([
             { value: "", label: "All" }, { value: "active", label: "Active" }, { value: "archived", label: "Archived" },
-          ], q.projects.status, (v) => { q.projects.status = v; q.projects.page = 1; pages.projects(); }, "Filter projects by status")));
+          ], q.projects.status, (v) => { q.projects.status = v; q.projects.page = 1; refreshRoute("projects"); }, "Filter projects by status")));
 
       if (!projects.items.length) {
         card.append(emptyState("folder", q.projects.search || q.projects.status ? "No matching projects" : "No projects yet",
           q.projects.search || q.projects.status ? "Try clearing the filters." : "Projects are where work lives. Create the first one to get started.",
-          can("project:create") && !q.projects.search && !q.projects.status
-            ? el("button", { class: "btn btn--primary", type: "button", onclick: () => projectForm(null, teams) }, icon("plus"), "New project") : null));
+          createActions.empty));
       } else {
         const rows = projects.items.map((p) => {
           const actions = el("div", { class: "row-actions" });
@@ -832,8 +1178,8 @@
               try {
                 await call(`/projects/${p.id}`, { method: "PATCH", body: { status: archiving ? "archived" : "active" } });
                 toast(archiving ? "Project archived" : "Project restored", "ok");
-                pages.projects();
-              } catch (e) { toast(e.message, "err"); }
+                refreshRoute("projects");
+              } catch (e) { if (shouldSurfaceAsyncError(e)) toast(e.message, "err"); }
             }, false, "archive-toggle"));
           }
           if (can("project:delete")) {
@@ -844,7 +1190,7 @@
               onConfirm: async () => {
                 await call(`/projects/${p.id}`, { method: "DELETE" });
                 toast("Project deleted", "ok");
-                pages.projects();
+                refreshRoute("projects");
               },
             }), true));
           }
@@ -862,7 +1208,7 @@
           { label: "Project" }, { label: "Status" }, { label: "Team" },
           { label: "Members", num: true }, { label: "Created" }, { actions: true },
         ], rows, "Projects"));
-        const p = pager(projects.page, (n) => { q.projects.page = n; pages.projects(); });
+        const p = pager(projects.page, (n) => { q.projects.page = n; refreshRoute("projects"); });
         if (p) card.append(p);
       }
 
@@ -899,34 +1245,37 @@
           await call("/projects", { method: "POST", body });
           toast("Project created", "ok");
         }
-        pages.projects();
+        refreshRoute("projects");
       },
     });
   }
 
   /* --- Teams --- */
 
-  pages.teams = () => view(
-    el("div", { class: "card" }, tableSkeleton(5)),
-    () => {
+  pages.teams = () => view({
+    title: "Teams", desc: "Teams group people. Access itself comes from roles, not team membership.",
+    action: can("team:create") ? "New team" : null,
+    content: el("div", { class: "card" }, tableSkeleton(5)),
+  },
+    (signal) => {
       const p = new URLSearchParams({ page: String(q.teams.page), page_size: "10" });
       if (q.teams.search) p.set("search", q.teams.search);
-      return list(`/teams?${p}`);
+      return list(`/teams?${p}`, { signal });
     },
     (teams) => {
+      const create = () => el("button", { class: "btn btn--primary", type: "button", onclick: () => teamForm(null) }, icon("plus"), "New team");
+      const createActions = collectionCreateActions(teams.items.length > 0, Boolean(q.teams.search), can("team:create"), create);
       const page = el("div", { class: "page" },
-        pageHead("Teams", "Teams group people. Access itself comes from roles, not team membership.",
-          can("team:create") ? el("button", { class: "btn btn--primary", type: "button", onclick: () => teamForm(null) }, icon("plus"), "New team") : null));
+        pageHead("Teams", "Teams group people. Access itself comes from roles, not team membership.", createActions.header));
 
       const card = el("section", { class: "card" },
         el("div", { class: "toolbar" },
-          searchBox(q.teams.search, "Search teams…", (v) => { q.teams.search = v; q.teams.page = 1; pages.teams(); })));
+          searchBox(q.teams.search, "Search teams…", (v) => { q.teams.search = v; q.teams.page = 1; refreshRoute("teams"); })));
 
       if (!teams.items.length) {
         card.append(emptyState("team", q.teams.search ? "No matching teams" : "No teams yet",
           q.teams.search ? "Try a different search." : "Create a team to group people around a shared area of work.",
-          can("team:create") && !q.teams.search
-            ? el("button", { class: "btn btn--primary", type: "button", onclick: () => teamForm(null) }, icon("plus"), "New team") : null));
+          createActions.empty));
       } else {
         const rows = teams.items.map((t) => {
           const actions = el("div", { class: "row-actions" });
@@ -940,7 +1289,7 @@
               onConfirm: async () => {
                 await call(`/teams/${t.id}`, { method: "DELETE" });
                 toast("Team deleted", "ok");
-                pages.teams();
+                refreshRoute("teams");
               },
             }), true));
           }
@@ -955,7 +1304,7 @@
         card.append(table([
           { label: "Team" }, { label: "Description" }, { label: "Members", num: true }, { label: "Created" }, { actions: true },
         ], rows, "Teams"));
-        const p = pager(teams.page, (n) => { q.teams.page = n; pages.teams(); });
+        const p = pager(teams.page, (n) => { q.teams.page = n; refreshRoute("teams"); });
         if (p) card.append(p);
       }
 
@@ -984,13 +1333,14 @@
           await call("/teams", { method: "POST", body });
           toast("Team created", "ok");
         }
-        pages.teams();
+        refreshRoute("teams");
       },
     });
   }
 
   /** membersSheet manages the roster of a team or project in a slide-over. */
   async function membersSheet(kind, resource) {
+    const ownership = actionOwner.begin();
     const base = kind === "team" ? "teams" : "projects";
     const perm = kind === "team" ? "team:manage" : "project:manage";
 
@@ -998,25 +1348,26 @@
     let people = [];
     try {
       const [m, u] = await Promise.all([
-        list(`/${base}/${resource.id}/members?page_size=100`),
-        can("member:view") ? list("/users?page_size=100").catch(() => ({ items: [] })) : { items: [] },
+        fetchAllPages(`/${base}/${resource.id}/members`, { signal: ownership.signal }),
+        can("member:view") ? fetchAllPages("/users", { signal: ownership.signal }) : { items: [] },
       ]);
       members = m.items;
       people = u.items;
     } catch (err) {
-      toast(err.message, "err");
+      if (ownership.owns() && !isAbort(err)) toast(err.message, "err");
       return;
     }
+    if (!ownership.owns()) return;
 
     const have = new Set(members.map((m) => m.user_id));
     const available = people.filter((p) => !have.has(p.id));
 
-    const roster = el("div", { class: "stack" });
+    const roster = members.length ? el("ul", { class: "stack" }) : el("div", { class: "stack" });
     if (!members.length) {
       roster.append(emptyState("users", "No members yet", `Nobody has been added to ${resource.name}.`));
     } else {
       for (const m of members) {
-        roster.append(el("div", { class: "feed__item" },
+        roster.append(el("li", { class: "feed__item" },
           el("span", { class: "avatar avatar--md", text: fmt.initials(m.full_name, m.email) }),
           el("div", { class: "feed__body" },
             el("p", { class: "feed__title", text: m.full_name || m.email }),
@@ -1026,8 +1377,8 @@
               await call(`/${base}/${resource.id}/members/${m.user_id}`, { method: "DELETE" });
               toast("Member removed", "ok");
               closeModal();
-              kind === "team" ? pages.teams() : pages.projects();
-            } catch (e) { toast(e.message, "err"); }
+              refreshRoute(kind === "team" ? "teams" : "projects");
+            } catch (e) { if (shouldSurfaceAsyncError(e, ownership)) toast(e.message, "err"); }
           }, true) : null));
       }
     }
@@ -1047,15 +1398,16 @@
 
         const add = el("button", { class: "btn btn--primary btn--block", type: "button" }, icon("plus"), `Add to ${kind}`);
         add.addEventListener("click", async () => {
-          add.disabled = true;
+          const stopBusy = setButtonBusy(add, `Adding to ${kind}…`);
           try {
             await call(`/${base}/${resource.id}/members`, { method: "POST", body: { user_id: select.value } });
             toast("Member added", "ok");
             closeModal();
-            kind === "team" ? pages.teams() : pages.projects();
+            refreshRoute(kind === "team" ? "teams" : "projects");
           } catch (e) {
-            toast(e.message, "err");
-            add.disabled = false;
+            if (shouldSurfaceAsyncError(e, ownership)) toast(e.message, "err");
+          } finally {
+            if (ownership.owns()) stopBusy();
           }
         });
 
@@ -1067,26 +1419,30 @@
     openModal({
       title: `${resource.name} members`,
       desc: "Membership groups people around this work. It grants no permissions by itself.",
-      body,
+      body, ownership,
     });
   }
 
   /* --- Members & invitations --- */
 
-  pages.members = () => view(
-    el("div", { class: "stack" }, el("div", { class: "card" }, tableSkeleton(5)), el("div", { class: "card" }, tableSkeleton(4, 3))),
-    async () => {
+  pages.members = () => view({
+    title: "Members", desc: "Everyone with access to this workspace, plus invitations still outstanding.",
+    action: can("member:invite") && can("role:view") ? "Invite member" : null,
+    content: el("div", { class: "stack" }, el("div", { class: "card" }, tableSkeleton(5)), el("div", { class: "card" }, tableSkeleton(4, 3))),
+  },
+    async (signal) => {
       const [users, invites, roles] = await Promise.all([
-        list(`/users?page=${q.members.page}&page_size=10`),
-        can("member:view") ? list("/invitations?status=pending&page_size=50").catch(() => ({ items: [] })) : { items: [] },
-        can("role:view") ? call("/roles").catch(() => []) : [],
+        list(`/users?page=${q.members.page}&page_size=10`, { signal }),
+        honestLoad(can("member:view"), () => list(`/invitations?status=pending&page=${q.members.invitePage}&page_size=10`, { signal })),
+        honestLoad(can("member:invite") && can("role:view"), () => call("/roles", { signal })),
       ]);
-      return { users, invites: invites.items, roles: roles || [] };
+      return { users, invites, roles };
     },
     ({ users, invites, roles }) => {
+      const roleItems = roles.kind === "ready" ? (roles.value || []) : [];
       const page = el("div", { class: "page" },
         pageHead("Members", "Everyone with access to this workspace, plus invitations still outstanding.",
-          can("member:invite") ? el("button", { class: "btn btn--primary", type: "button", onclick: () => inviteForm(roles) }, icon("mail"), "Invite member") : null));
+          can("member:invite") && roles.kind === "ready" ? el("button", { class: "btn btn--primary", type: "button", onclick: () => inviteForm(roleItems) }, icon("mail"), "Invite member") : null));
 
       const dir = el("section", { class: "card" },
         el("div", { class: "card__head" }, el("div", {}, el("h2", { class: "card__title", text: "Directory" }),
@@ -1106,21 +1462,28 @@
       dir.append(table([
         { label: "Person" }, { label: "Status" }, { label: "Email" }, { label: "Joined" }, { actions: true },
       ], rows, "Member directory"));
-      const pg = pager(users.page, (n) => { q.members.page = n; pages.members(); });
+      const pg = pager(users.page, (n) => { q.members.page = n; refreshRoute("members"); });
       if (pg) dir.append(pg);
 
       const stack = el("div", { class: "stack" }, dir);
+      if (can("member:invite") && roles.kind === "error") {
+        stack.append(el("section", { class: "card" }, el("div", { class: "card__body" },
+          inlineState("Invitation roles unavailable", roles.error.message, () => refreshRoute("members")))));
+      }
 
       if (can("member:view")) {
+        const inviteItems = invites.kind === "ready" ? invites.value.items : [];
         const inv = el("section", { class: "card" },
           el("div", { class: "card__head" }, el("div", {},
             el("h2", { class: "card__title", text: "Pending invitations" }),
             el("p", { class: "card__sub", text: "Pending invitations count against the plan's seat limit" }))));
 
-        if (!invites.length) {
+        if (invites.kind === "error") {
+          inv.append(el("div", { class: "card__body" }, inlineState("Invitations unavailable", invites.error.message, () => refreshRoute("members"))));
+        } else if (!inviteItems.length) {
           inv.append(emptyState("mail", "No pending invitations", "Everyone invited has responded."));
         } else {
-          const irows = invites.map((i) => {
+          const irows = inviteItems.map((i) => {
             const actions = el("div", { class: "row-actions" });
             if (can("member:invite")) {
               actions.append(rowBtn("trash", "Revoke", () => confirmModal({
@@ -1130,7 +1493,7 @@
                 onConfirm: async () => {
                   await call(`/invitations/${i.id}`, { method: "DELETE" });
                   toast("Invitation revoked", "ok");
-                  pages.members();
+                  refreshRoute("members");
                 },
               }), true));
             }
@@ -1141,6 +1504,8 @@
               el("td", { class: "actions" }, actions));
           });
           inv.append(table([{ label: "Email" }, { label: "Role" }, { label: "Expiry" }, { actions: true }], irows, "Pending invitations"));
+          const invitePager = pager(invites.value.page, (n) => { q.members.invitePage = n; refreshRoute("members"); });
+          if (invitePager) inv.append(invitePager);
         }
         stack.append(inv);
       }
@@ -1156,17 +1521,17 @@
       submit: "Send invitation",
       fields: [
         { name: "email", label: "Email address", type: "email", required: true, placeholder: "teammate@company.com" },
-        { name: "role_id", label: "Role", type: "select", options: roles.map((r) => ({ value: r.id, label: r.name })) },
+        { name: "role_id", label: "Role", type: "select", required: true, options: roles.map((r) => ({ value: r.id, label: r.name })) },
       ],
-      onSubmit: async (v) => {
+      onSubmit: async (v, ownership) => {
         const res = await call("/invitations", { method: "POST", body: { email: v.email, role_id: v.role_id } });
-        pages.members();
-        setTimeout(() => showInvite(v.email, res.token), 140);
+        refreshRoute("members");
+        setTimeout(() => { if (ownership.owns()) showInvite(v.email, res.token, ownership); }, 140);
       },
     });
   }
 
-  function showInvite(email, token) {
+  function showInvite(email, token, ownership) {
     const link = `${window.location.origin}/?invite=${encodeURIComponent(token)}`;
     openModal({
       title: "Invitation created",
@@ -1177,15 +1542,19 @@
           el("button", { class: "icon-btn", type: "button", title: "Copy link", "aria-label": "Copy invitation link", onclick: () => copy(link) }, icon("copy"))),
         el("p", { class: "field__hint", text: "No email transport is configured in this deployment, so the link is surfaced here instead of being sent." })),
       footer: el("div", { class: "modal__foot" }, el("button", { class: "btn btn--primary", type: "button", onclick: closeModal }, "Done")),
+      ownership,
     });
   }
 
   /* --- Roles --- */
 
-  pages.roles = () => view(
-    el("div", { class: "card" }, tableSkeleton(5)),
-    async () => {
-      const [roles, catalog] = await Promise.all([call("/roles"), call("/permissions")]);
+  pages.roles = () => view({
+    title: "Roles", desc: "Permissions resolve from the database on every request, so edits take effect immediately.",
+    action: can("role:manage") ? "New role" : null,
+    content: el("div", { class: "card" }, tableSkeleton(5)),
+  },
+    async (signal) => {
+      const [roles, catalog] = await Promise.all([call("/roles", { signal }), call("/permissions", { signal })]);
       return { roles: roles || [], catalog: catalog || [] };
     },
     ({ roles, catalog }) => {
@@ -1196,7 +1565,7 @@
       const rows = roles.map((r) => {
         const actions = el("div", { class: "row-actions" });
         if (can("role:manage")) {
-          actions.append(rowBtn("edit", "Edit permissions", () => rolePerms(r, catalog)));
+          actions.append(rowBtn("edit", "Edit permissions", () => rolePerms(r)));
           // System roles are never deletable: registration and several
           // authorization flows assume owner/admin/member exist.
           if (!r.is_system) {
@@ -1207,7 +1576,7 @@
               onConfirm: async () => {
                 await call(`/roles/${r.id}`, { method: "DELETE" });
                 toast("Role deleted", "ok");
-                pages.roles();
+                refreshRoute("roles");
               },
             }), true));
           }
@@ -1248,26 +1617,96 @@
       onSubmit: async (v) => {
         await call("/roles", { method: "POST", body: { name: v.name, description: v.description, permission_codes: v.permission_codes } });
         toast("Role created", "ok");
-        pages.roles();
+        refreshRoute("roles");
       },
     });
   }
 
-  function rolePerms(role, catalog) {
+  // ROLE_PERMISSION_EDITOR_VALIDATION_BEGIN
+  function validateRolePermissionEditorData(role, current, freshCatalog) {
+    if (!current || current.role_id !== role.id ||
+        !Array.isArray(current.permission_codes) ||
+        typeof current.revision !== "string" || current.revision.length === 0 ||
+        !Array.isArray(freshCatalog)) {
+      throw new Error("the server returned incomplete or mismatched role data");
+    }
+
+    const catalogCodes = new Set();
+    for (const permission of freshCatalog) {
+      if (!permission || typeof permission.code !== "string" || permission.code.length === 0 ||
+          catalogCodes.has(permission.code)) {
+        throw new Error("the permission catalog cannot be represented exactly");
+      }
+      catalogCodes.add(permission.code);
+    }
+
+    const grantCodes = new Set();
+    for (const code of current.permission_codes) {
+      if (typeof code !== "string" || code.length === 0 || grantCodes.has(code) || !catalogCodes.has(code)) {
+        throw new Error("the role's current grants cannot be represented exactly by the permission catalog");
+      }
+      grantCodes.add(code);
+    }
+
+    return { initialCodes: current.permission_codes.slice(), catalog: freshCatalog };
+  }
+  // ROLE_PERMISSION_EDITOR_VALIDATION_END
+
+  async function rolePerms(role) {
+    const ownership = actionOwner.begin();
+    let current;
+    let editorData;
+    try {
+      const freshCatalogRequest = call("/permissions", { signal: ownership.signal });
+      [current, editorData] = await Promise.all([
+        call(`/roles/${role.id}/permissions`, { signal: ownership.signal }),
+        freshCatalogRequest,
+      ]);
+      editorData = validateRolePermissionEditorData(role, current, editorData);
+    } catch (err) {
+      if (ownership.owns() && !isAbort(err)) toast(`Could not load ${role.name} permissions: ${err.message}. The editor was not opened.`, "err");
+      return false;
+    }
+    if (!ownership.owns()) return false;
+
+    const initialCodes = editorData.initialCodes;
     formModal({
       title: `${role.name} permissions`,
       desc: role.is_system
         ? "This is a system role: its permission set is editable, but it cannot be renamed or deleted."
         : "Choose exactly which capabilities this role grants.",
       submit: "Save permissions",
+      submitWhenChanged: true,
       wide: true,
-      fields: [{ name: "permission_codes", label: "Permissions", type: "picker", options: catalog, value: [] }],
+      fields: [{ name: "permission_codes", label: "Permissions", type: "picker", options: editorData.catalog, value: initialCodes }],
+      ownership,
       onSubmit: async (v) => {
-        await call(`/roles/${role.id}/permissions`, { method: "PUT", body: { permission_codes: v.permission_codes } });
+        if (initialCodes.length > 0 && v.permission_codes.length === 0 &&
+            !window.confirm(`Remove every permission from ${role.name}? Members with only this role will lose all access it grants.`)) {
+          throw new ApiError(0, "CANCELED", "Remove-all was canceled. No permissions were changed.");
+        }
+        try {
+          await call(`/roles/${role.id}/permissions`, {
+            method: "PUT",
+            headers: { "If-Match": `"${current.revision}"` },
+            body: { permission_codes: v.permission_codes },
+          });
+        } catch (err) {
+          if (err.status === 409) {
+            const conflict = new ApiError(409, "CONFLICT", "This role changed after you opened the editor. Your selection was not saved.");
+            conflict.actionLabel = "Reload permissions";
+            conflict.onAction = async () => {
+              if (!await rolePerms(role)) throw new Error("The latest permissions could not be loaded.");
+            };
+            throw conflict;
+          }
+          throw err;
+        }
         toast("Permissions updated", "ok");
-        pages.roles();
+        refreshRoute("roles");
       },
     });
+    return true;
   }
 
   /* --- API keys --- */
@@ -1281,20 +1720,24 @@
     "apikey:view", "billing:view", "file:upload", "file:delete", "audit:view",
   ];
 
-  pages["api-keys"] = () => view(
-    el("div", { class: "card" }, tableSkeleton(6)),
-    () => list("/api-keys?page_size=50"),
+  pages["api-keys"] = () => view({
+    title: "API keys", desc: "Machine credentials for server-to-server access, limited to the scopes you choose.",
+    action: can("apikey:manage") ? "Create key" : null,
+    content: el("div", { class: "card" }, tableSkeleton(6)),
+  },
+    (signal) => list(`/api-keys?page=${q.apiKeys.page}&page_size=20`, { signal }),
     (keys) => {
+      const create = () => el("button", { class: "btn btn--primary", type: "button", onclick: keyForm }, icon("plus"), "Create key");
+      const createActions = collectionCreateActions(keys.items.length > 0, false, can("apikey:manage"), create);
       const page = el("div", { class: "page" },
-        pageHead("API keys", "Machine credentials for server-to-server access, limited to the scopes you choose.",
-          can("apikey:manage") ? el("button", { class: "btn btn--primary", type: "button", onclick: keyForm }, icon("plus"), "Create key") : null));
+        pageHead("API keys", "Machine credentials for server-to-server access, limited to the scopes you choose.", createActions.header));
 
       const card = el("section", { class: "card" });
 
       if (!keys.items.length) {
         card.append(emptyState("key", "No API keys",
           "Create a key so a CI pipeline or service can call the API without a user session.",
-          can("apikey:manage") ? el("button", { class: "btn btn--primary", type: "button", onclick: keyForm }, icon("plus"), "Create key") : null));
+          createActions.empty));
       } else {
         const rows = keys.items.map((k) => {
           const revoked = Boolean(k.revoked_at);
@@ -1308,7 +1751,7 @@
               onConfirm: async () => {
                 await call(`/api-keys/${k.id}`, { method: "DELETE" });
                 toast("API key revoked", "ok");
-                pages["api-keys"]();
+                refreshRoute("api-keys");
               },
             }), true));
           }
@@ -1324,6 +1767,8 @@
         card.append(table([
           { label: "Key" }, { label: "Scopes" }, { label: "State" }, { label: "Last used" }, { label: "Expires" }, { actions: true },
         ], rows, "API keys"));
+        const keyPager = pager(keys.page, (n) => { q.apiKeys.page = n; refreshRoute("api-keys"); });
+        if (keyPager) card.append(keyPager);
       }
 
       page.append(card);
@@ -1341,18 +1786,18 @@
         { name: "expires_at", label: "Expires on", type: "date", optional: true, hint: "Recommended — an unexpiring key that leaks is valid until noticed" },
         { name: "scopes", label: "Scopes", type: "picker", options: SCOPES.map((code) => ({ code })), value: ["project:view"] },
       ],
-      onSubmit: async (v) => {
+      onSubmit: async (v, ownership) => {
         if (!v.scopes.length) throw new ApiError(400, "VALIDATION", "Choose at least one scope.");
         const body = { name: v.name, scopes: v.scopes };
         if (v.expires_at) body.expires_at = new Date(`${v.expires_at}T23:59:59Z`).toISOString();
         const res = await call("/api-keys", { method: "POST", body });
-        pages["api-keys"]();
-        setTimeout(() => showSecret(res.secret), 140);
+        refreshRoute("api-keys");
+        setTimeout(() => { if (ownership.owns()) showSecret(res.secret, ownership); }, 140);
       },
     });
   }
 
-  function showSecret(secret) {
+  function showSecret(secret, ownership) {
     openModal({
       title: "Copy your API key",
       desc: "This is the only time the key is shown. Store it in your secret manager now.",
@@ -1362,16 +1807,20 @@
           el("button", { class: "icon-btn", type: "button", title: "Copy key", "aria-label": "Copy API key", onclick: () => copy(secret) }, icon("copy"))),
         el("p", { class: "field__hint", text: "Send it as an X-API-Key header, or as Authorization: Bearer. If it leaks, revoke it here immediately." })),
       footer: el("div", { class: "modal__foot" }, el("button", { class: "btn btn--primary", type: "button", onclick: closeModal }, "I've stored it")),
+      ownership,
     });
   }
 
   /* --- Billing --- */
 
-  pages.billing = () => view(
-    el("div", { class: "stack" }, kpiSkeleton(), el("div", { class: "card" }, tableSkeleton(3, 3))),
-    async () => {
+  pages.billing = () => view({
+    title: "Billing", desc: "Quota limits are enforced by the API, not merely displayed here.",
+    action: can("billing:manage") ? "Cancel plan" : null,
+    content: el("div", { class: "stack" }, kpiSkeleton(), el("div", { class: "card" }, tableSkeleton(3, 3))),
+  },
+    async (signal) => {
       const [plans, sub, usage] = await Promise.all([
-        call("/billing/plans", { auth: false }), call("/billing/subscription"), call("/billing/usage"),
+        call("/billing/plans", { auth: false, signal }), call("/billing/subscription", { signal }), call("/billing/usage", { signal }),
       ]);
       return { plans: plans || [], sub, usage };
     },
@@ -1386,7 +1835,7 @@
           onConfirm: async () => {
             await call("/billing/subscription", { method: "DELETE" });
             toast("Subscription cancels at period end", "ok");
-            pages.billing();
+            refreshRoute("billing");
           },
         }) }, "Cancel plan")
         : null;
@@ -1452,23 +1901,25 @@
         toast(`Now on the ${plan.name} plan`, "ok");
         await loadProfile();
         paintIdentity();
-        pages.billing();
+        refreshRoute("billing");
       },
     });
   }
 
   /* --- Audit --- */
 
-  pages.audit = () => view(
-    el("div", { class: "card" }, tableSkeleton(4, 8)),
-    async () => {
+  pages.audit = () => view({
+    title: "Audit log", desc: "An append-only record of security-relevant actions. The application role holds no UPDATE or DELETE grant on this table.",
+    content: el("div", { class: "card" }, tableSkeleton(4, 8)),
+  },
+    async (signal) => {
       const p = new URLSearchParams({ page: String(q.audit.page), page_size: "15" });
       if (q.audit.action) p.set("action", q.audit.action);
       const [logs, activity] = await Promise.all([
-        list(`/audit-logs?${p}`),
-        can("org:view") ? list("/activity?page_size=8").catch(() => ({ items: [] })) : { items: [] },
+        list(`/audit-logs?${p}`, { signal }),
+        honestLoad(can("org:view"), () => list("/activity?page_size=8", { signal })),
       ]);
-      return { logs, activity: activity.items };
+      return { logs, activity };
     },
     ({ logs, activity }) => {
       const page = el("div", { class: "page" },
@@ -1476,7 +1927,7 @@
 
       const card = el("section", { class: "card" },
         el("div", { class: "toolbar" },
-          searchBox(q.audit.action, "Filter by action, e.g. team.created", (v) => { q.audit.action = v; q.audit.page = 1; pages.audit(); })));
+          searchBox(q.audit.action, "Filter by action, e.g. team.created", (v) => { q.audit.action = v; q.audit.page = 1; refreshRoute("audit"); })));
 
       if (!logs.items.length) {
         card.append(emptyState("activity", q.audit.action ? "No matching entries" : "No audit entries",
@@ -1490,17 +1941,26 @@
             el("td", {}, el("span", { class: "cell--muted", text: fmt.dateTime(e.created_at) })));
         });
         card.append(table([{ label: "Action" }, { label: "Target" }, { label: "Source IP" }, { label: "When" }], rows, "Audit log entries"));
-        const pg = pager(logs.page, (n) => { q.audit.page = n; pages.audit(); });
+        const pg = pager(logs.page, (n) => { q.audit.page = n; refreshRoute("audit"); });
         if (pg) card.append(pg);
       }
 
-      const feed = el("section", { class: "card" },
-        el("div", { class: "card__head" }, el("div", {},
-          el("h2", { class: "card__title", text: "Activity" }),
-          el("p", { class: "card__sub", text: "The product-facing counterpart to the audit trail" }))));
-      feed.append(activity.length
-        ? el("div", { class: "card__body" }, feedList(activity))
-        : emptyState("activity", "Nothing yet", "Activity appears as people work in the workspace."));
+      let feed = null;
+      if (activity.kind !== "forbidden") {
+        feed = el("section", { class: "card" },
+          el("div", { class: "card__head" }, el("div", {},
+            el("h2", { class: "card__title", text: "Activity" }),
+            el("p", { class: "card__sub", text: activity.kind === "ready" && activity.value.page
+              ? `Showing latest ${activity.value.items.length} of ${activity.value.page.total}`
+              : "The product-facing counterpart to the audit trail" }))));
+        if (activity.kind === "error") {
+          feed.append(el("div", { class: "card__body" }, inlineState("Activity unavailable", activity.error.message, () => refreshRoute("audit"))));
+        } else {
+          feed.append(activity.value.items.length
+            ? el("div", { class: "card__body" }, feedList(activity.value.items))
+            : emptyState("activity", "Nothing yet", "Activity appears as people work in the workspace."));
+        }
+      }
 
       page.append(el("div", { class: "split" }, card, feed));
       return page;
@@ -1508,10 +1968,12 @@
 
   /* --- Settings --- */
 
-  pages.settings = () => view(
-    el("div", { class: "card" }, tableSkeleton(2, 5)),
-    async () => {
-      const [profile, prefs] = await Promise.all([call("/profile"), call("/preferences")]);
+  pages.settings = () => view({
+    title: "Settings", desc: "Your profile, display preferences, and password.", narrow: true,
+    content: el("div", { class: "card" }, tableSkeleton(2, 5)),
+  },
+    async (signal) => {
+      const [profile, prefs] = await Promise.all([call("/profile", { signal }), call("/preferences", { signal })]);
       return { profile, prefs };
     },
     ({ profile, prefs }) => {
@@ -1526,7 +1988,7 @@
       const profileForm = el("form", {});
       profileForm.addEventListener("submit", async (ev) => {
         ev.preventDefault();
-        saveProfile.disabled = true;
+        const stopBusy = setButtonBusy(saveProfile, "Saving…");
         try {
           const body = { full_name: name.value.trim() };
           if (avatar.value.trim()) body.avatar_url = avatar.value.trim();
@@ -1535,7 +1997,7 @@
           toast("Profile updated", "ok");
           await loadProfile();
           paintIdentity();
-        } catch (e) { toast(e.message, "err"); } finally { saveProfile.disabled = false; }
+        } catch (e) { if (shouldSurfaceAsyncError(e)) toast(e.message, "err"); } finally { stopBusy(); }
       });
       profileForm.append(
         el("div", { class: "form-row" },
@@ -1553,7 +2015,7 @@
 
       /* Preferences */
       const themeSel = el("select", { class: "select", id: "s-theme" });
-      for (const t of ["system", "light", "dark"]) {
+      for (const t of ["dark", "light", "system"]) {
         themeSel.append(el("option", { value: t, selected: theme.current() === t }, fmt.title(t)));
       }
       const tz = el("input", { class: "input", id: "s-tz", value: prefs.timezone, maxlength: 50 });
@@ -1569,7 +2031,7 @@
       const prefsForm = el("form", {});
       prefsForm.addEventListener("submit", async (ev) => {
         ev.preventDefault();
-        savePrefs.disabled = true;
+        const stopBusy = setButtonBusy(savePrefs, "Saving…");
         try {
           await call("/preferences", {
             method: "PATCH",
@@ -1577,7 +2039,7 @@
           });
           theme.apply(themeSel.value);
           toast("Preferences saved", "ok");
-        } catch (e) { toast(e.message, "err"); } finally { savePrefs.disabled = false; }
+        } catch (e) { if (shouldSurfaceAsyncError(e)) toast(e.message, "err"); } finally { stopBusy(); }
       });
       prefsForm.append(
         el("div", { class: "form-row" },
@@ -1604,12 +2066,12 @@
       const pwForm = el("form", {});
       pwForm.addEventListener("submit", async (ev) => {
         ev.preventDefault();
-        savePw.disabled = true;
+        const stopBusy = setButtonBusy(savePw, "Changing…");
         try {
           await call("/profile/change-password", { method: "POST", body: { current_password: cur.value, new_password: nw.value } });
           toast("Password changed. Other sessions were signed out.", "ok");
           pwForm.reset();
-        } catch (e) { toast(e.message, "err"); } finally { savePw.disabled = false; }
+        } catch (e) { if (shouldSurfaceAsyncError(e)) toast(e.message, "err"); } finally { stopBusy(); }
       });
       pwForm.append(
         el("div", { class: "form-row" },
@@ -1647,7 +2109,11 @@
     } catch (_) { /* non-critical */ }
   }
 
-  async function openNotifications() {
+  const notificationOwner = createGenerationOwner();
+
+  async function openNotifications(pageNumber = q.notifications.page) {
+    q.notifications.page = pageNumber;
+    const ownership = notificationOwner.begin();
     const sheet = $("#notifications");
     // "Mark all read" re-enters this function with the panel already open, and it
     // may be mid-dismissal; without this the pending timeout would slide the
@@ -1660,30 +2126,35 @@
     if (!sheet.open) sheet.showModal();
 
     try {
-      const { items } = await list("/notifications?page_size=25");
+      const result = await list(`/notifications?page=${q.notifications.page}&page_size=25`, { signal: ownership.signal });
+      if (!ownership.owns()) return;
       clear(body);
-      if (!items.length) {
+      if (!result.items.length) {
         body.append(emptyState("inbox", "Nothing new", "Notifications about your workspace appear here."));
         return;
       }
-      for (const n of items) {
-        body.append(el("div", { class: `notif${n.read_at ? "" : " notif--unread"}` },
+      const notifications = el("ul", {});
+      for (const n of result.items) {
+        notifications.append(el("li", { class: `notif${n.read_at ? "" : " notif--unread"}` },
           el("p", { class: "notif__title", text: n.title }),
           n.body ? el("p", { class: "notif__text", text: n.body }) : null,
           el("time", { class: "notif__time", datetime: n.created_at, text: fmt.ago(n.created_at) })));
       }
+      body.append(notifications);
+      const notificationPager = pager(result.page, (next) => openNotifications(next));
+      if (notificationPager) body.append(notificationPager);
     } catch (err) {
-      clear(body).append(emptyState("alert", "Could not load notifications", err.message));
+      if (!ownership.owns() || isAbort(err)) return;
+      clear(body).append(inlineState("Could not load notifications", err.message, () => openNotifications(q.notifications.page)));
     } finally {
-      // In a finally, not after the loop: the empty case returns early and the
-      // failure case throws past it, and both must clear the busy state.
-      body.removeAttribute("aria-busy");
+      if (ownership.owns()) body.removeAttribute("aria-busy");
     }
   }
 
   /* Command palette — the ⌘K surface. Navigation plus the create actions the
      caller is actually permitted to perform. */
   const palette = $("#palette");
+  const paletteOwner = createGenerationOwner();
   let paletteItems = [];
   let paletteIndex = 0;
 
@@ -1700,14 +2171,15 @@
       { group: "Navigate", label: "Settings", glyph: "settings", route: "settings" },
     ];
     const actions = [
-      { group: "Create", label: "New project", glyph: "plus", perm: "project:create", run: async () => {
-        const t = can("team:view") ? await list("/teams?page_size=100").catch(() => ({ items: [] })) : { items: [] };
-        projectForm(null, t.items);
+      { group: "Create", label: "New project", glyph: "plus", perm: "project:create", run: async ({ signal, owns }) => {
+        const t = can("team:view") ? await fetchAllPages("/teams", { signal }) : { items: [] };
+        if (owns()) projectForm(null, t.items);
       } },
       { group: "Create", label: "New team", glyph: "plus", perm: "team:create", run: () => teamForm(null) },
-      { group: "Create", label: "Invite member", glyph: "mail", perm: "member:invite", run: async () => {
-        const roles = can("role:view") ? await call("/roles").catch(() => []) : [];
-        inviteForm(roles || []);
+      { group: "Create", label: "Invite member", glyph: "mail", perm: "member:invite", run: async ({ signal, owns }) => {
+        if (!can("role:view")) throw new Error("Role access is required to choose an invitation role.");
+        const roles = await call("/roles", { signal });
+        if (owns()) inviteForm(roles || []);
       } },
       { group: "Create", label: "Create API key", glyph: "key", perm: "apikey:manage", run: keyForm },
       { group: "Preferences", label: "Toggle theme", glyph: "sun", run: () => theme.cycle() },
@@ -1773,15 +2245,30 @@
   }
 
   function runPalette(cmd) {
-    // The palette fades out while the command it launched takes over. Navigation
-    // and the create modals both come up inside the 150ms, which reads as a
-    // handoff — the palette is visibly the thing that dispatched it.
+    // Every dispatch owns a generation. Repeated Enter/click cannot let a slower
+    // picker request from an older command open over a newer command's result.
+    const ownership = paletteOwner.begin();
+    actionOwner.invalidate();
     dismiss(palette);
-    if (cmd.route) window.location.hash = `#/${cmd.route}`;
-    else if (cmd.run) cmd.run();
+    if (cmd.route) {
+      window.location.hash = `#/${cmd.route}`;
+      return;
+    }
+    if (cmd.run) {
+      Promise.resolve(cmd.run({ signal: ownership.signal, owns: ownership.owns })).catch((err) => {
+        if (ownership.owns() && !isAbort(err)) toast(err.message, "err");
+      });
+    }
   }
 
+  // PALETTE_MODIFIER_BEGIN
+  function paletteModifierLabel(platform) {
+    return /Mac|iPhone|iPad|iPod/i.test(platform || "") ? "⌘" : "Ctrl";
+  }
+  // PALETTE_MODIFIER_END
+
   function openPalette() {
+    paletteOwner.invalidate();
     cancelExit(palette);
     const input = $("#palette-query");
     input.value = "";
@@ -1799,6 +2286,10 @@
 
   function route() {
     if (!state.profile) return;
+    viewOwner.invalidate();
+    actionOwner.invalidate();
+    paletteOwner.invalidate();
+    if (modal.open) closeModal();
 
     const raw = (window.location.hash || "#/overview").replace(/^#\/?/, "").split("?")[0];
     const name = pages[raw] ? raw : "overview";
@@ -1826,7 +2317,7 @@
     document.title = `${label} · Tenancy`;
     $("#route-status").textContent = label;
 
-    closeNav();
+    closeNav({ restoreFocus: false });
     host().scrollTop = 0;
     pages[name]();
     // After pages[name](), not before: view() renders its skeleton synchronously
@@ -1845,10 +2336,11 @@
     state.perms = new Set(state.profile.permissions || []);
     // The server-side preference is authoritative on a fresh sign-in, but a
     // local override the user set on this device wins until they change it.
-    const stored = theme.current();
-    if (stored === "system" && state.profile.preferences && state.profile.preferences.theme) {
+    // "Fresh" means nothing stored at all — not the resolved mode, which now
+    // defaults to dark and would otherwise mask a saved "light" preference.
+    if (theme.stored() === null && state.profile.preferences && state.profile.preferences.theme) {
       const t = state.profile.preferences.theme;
-      if (t === "light" || t === "dark") theme.apply(t);
+      if (t === "light" || t === "dark" || t === "system") theme.apply(t);
     }
   }
 
@@ -1901,22 +2393,23 @@
     $("#auth-switch").dataset.target = reg ? "login" : "register";
   }
 
-  function authMsg(text, ok = false) {
+  function authMsg(text, ok = false, form = null) {
     const box = $("#auth-alert");
     box.classList.toggle("alert--ok", ok);
     // Unhide first, then write. A role="alert" announces a change to a region
-    // that is already in the accessibility tree; text written while the node is
-    // still [hidden] is the initial content of a region that appears, which is
-    // the weaker of the two cases and not guaranteed to be spoken.
+    // that is already in the accessibility tree.
     box.hidden = false;
     box.textContent = text;
+    if (form && !ok) {
+      for (const control of form.querySelectorAll("input")) {
+        control.setAttribute("aria-invalid", "true");
+        const described = (control.getAttribute("aria-describedby") || "").split(/\s+/).filter(Boolean);
+        control.setAttribute("aria-describedby", Array.from(new Set(described.concat(box.id))).join(" "));
+      }
+    }
   }
 
-  async function enter(tokens) {
-    state.access = tokens.access_token;
-    state.refresh = tokens.refresh_token;
-    session.save();
-
+  async function activateSession() {
     await loadProfile();
     paintIdentity();
     $("#auth").hidden = true;
@@ -1927,7 +2420,42 @@
     else route();
   }
 
+  function showSessionRetry(err) {
+    showAuth("login");
+    authMsg(`Your session is still saved, but the workspace could not be loaded: ${err.message}`);
+    const retry = el("button", { class: "btn btn--secondary btn--sm", type: "button" }, "Retry session");
+    retry.addEventListener("click", async () => {
+      const stopBusy = setButtonBusy(retry, "Retrying…");
+      try {
+        await activateSession();
+      } catch (retryErr) {
+        if (isAbort(retryErr) || isAuthoritativeAuthError(retryErr)) return;
+        authMsg(`Your session is still saved, but the workspace could not be loaded: ${retryErr.message}`);
+        $("#auth-alert").append(retry);
+      } finally {
+        stopBusy();
+      }
+    });
+    $("#auth-alert").append(retry);
+  }
+
+  async function enter(tokens) {
+    sessionEpoch += 1;
+    signedOut = false;
+    state.access = tokens.access_token;
+    state.refresh = tokens.refresh_token;
+    session.save();
+    await activateSession();
+  }
+
   function signOut(silent = false) {
+    if (signedOut) return;
+    signedOut = true;
+    sessionEpoch += 1;
+    viewOwner.invalidate();
+    paletteOwner.invalidate();
+    notificationOwner.invalidate();
+    actionOwner.invalidate();
     const token = state.refresh;
     session.clear();
     if (token) call("/auth/logout", { method: "POST", body: { refresh_token: token }, auth: false }).catch(() => {});
@@ -1943,6 +2471,15 @@
     // its own copy of the same control.
     $("#auth-theme").addEventListener("click", () => theme.cycle());
 
+    $$("#auth form").forEach((form) => form.addEventListener("input", (event) => {
+      const control = event.target.closest("input");
+      if (!control) return;
+      control.removeAttribute("aria-invalid");
+      const ids = (control.getAttribute("aria-describedby") || "").split(/\s+/).filter((id) => id && id !== "auth-alert");
+      if (ids.length) control.setAttribute("aria-describedby", ids.join(" "));
+      else control.removeAttribute("aria-describedby");
+    }));
+
     $$("[data-reveal]").forEach((btn) => {
       btn.addEventListener("click", () => {
         const input = document.getElementById(btn.dataset.reveal);
@@ -1955,7 +2492,7 @@
     $("#form-login").addEventListener("submit", async (e) => {
       e.preventDefault();
       const btn = e.target.querySelector("[type=submit]");
-      btn.disabled = true;
+      const stopBusy = setButtonBusy(btn, "Signing in…");
       try {
         const body = { email: $("#login-email").value.trim(), password: $("#login-password").value };
         const slug = $("#login-slug").value.trim();
@@ -1969,13 +2506,17 @@
           return;
         }
         await enter(d.tokens);
-      } catch (err) { authMsg(err.message); } finally { btn.disabled = false; }
+      } catch (err) {
+        if (isAbort(err)) return;
+        if (state.access && !isAuthoritativeAuthError(err)) showSessionRetry(err);
+        else authMsg(err.message, false, e.target);
+      } finally { stopBusy(); }
     });
 
     $("#form-register").addEventListener("submit", async (e) => {
       e.preventDefault();
       const btn = e.target.querySelector("[type=submit]");
-      btn.disabled = true;
+      const stopBusy = setButtonBusy(btn, "Creating…");
       try {
         const d = await call("/auth/register", { method: "POST", auth: false, body: {
           tenant_name: $("#reg-org").value.trim(),
@@ -1986,13 +2527,17 @@
         } });
         await enter(d.tokens);
         toast("Workspace created — you are the owner", "ok");
-      } catch (err) { authMsg(err.message); } finally { btn.disabled = false; }
+      } catch (err) {
+        if (isAbort(err)) return;
+        if (state.access && !isAuthoritativeAuthError(err)) showSessionRetry(err);
+        else authMsg(err.message, false, e.target);
+      } finally { stopBusy(); }
     });
 
     $("#form-invite").addEventListener("submit", async (e) => {
       e.preventDefault();
       const btn = e.target.querySelector("[type=submit]");
-      btn.disabled = true;
+      const stopBusy = setButtonBusy(btn, "Accepting…");
       try {
         await call("/invitations/accept", { method: "POST", auth: false, body: {
           token: state.inviteToken,
@@ -2004,22 +2549,25 @@
         history.replaceState(null, "", window.location.pathname);
         setMode("login");
         authMsg("Invitation accepted. Sign in with your new password.", true);
-      } catch (err) { authMsg(err.message); } finally { btn.disabled = false; }
+      } catch (err) { if (!isAbort(err)) authMsg(err.message, false, e.target); } finally { stopBusy(); }
     });
   }
 
   function wireShell() {
+    const platform = (navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || "";
+    $("#palette-modifier").textContent = paletteModifierLabel(platform);
     $("#signout").addEventListener("click", () => signOut());
     $("#theme-btn").addEventListener("click", () => theme.cycle());
     $("#omni").addEventListener("click", openPalette);
-    $("#bell").addEventListener("click", openNotifications);
+    $("#palette-mobile").addEventListener("click", openPalette);
+    $("#bell").addEventListener("click", () => openNotifications());
 
     $("#read-all").addEventListener("click", async () => {
       try {
         await call("/notifications/read-all", { method: "POST" });
         await openNotifications();
         badgeCount();
-      } catch (e) { toast(e.message, "err"); }
+      } catch (e) { if (shouldSurfaceAsyncError(e)) toast(e.message, "err"); }
     });
 
     $$("[data-close]").forEach((b) => b.addEventListener("click", (e) => dismiss(e.currentTarget.closest("dialog"))));
@@ -2038,7 +2586,7 @@
     });
 
     $$('[data-nav="open"]').forEach((b) => b.addEventListener("click", openNav));
-    $$('[data-nav="close"]').forEach((b) => b.addEventListener("click", closeNav));
+    $$('[data-nav="close"]').forEach((b) => b.addEventListener("click", () => closeNav()));
 
     // Palette keyboard model: ⌘K anywhere, arrows to move, Enter to run.
     const query = $("#palette-query");
@@ -2050,6 +2598,7 @@
     });
 
     window.addEventListener("keydown", (e) => {
+      if (trapNavFocus(e)) return;
       const mod = e.metaKey || e.ctrlKey;
       if (mod && e.key.toLowerCase() === "k") {
         e.preventDefault();
@@ -2072,10 +2621,45 @@
       }
     });
 
+    drawerMedia.addEventListener("change", (event) => {
+      if (!event.matches && document.body.classList.contains("nav-open")) closeNav();
+    });
     window.addEventListener("hashchange", route);
   }
 
   /* ──────────────────────────────── Boot ─────────────────────────────── */
+
+  async function loadInvitePreview() {
+    const detail = clear($("#invite-detail"));
+    const submit = $("#form-invite").querySelector("[type=submit]");
+    submit.disabled = true;
+    detail.classList.remove("callout--warn", "callout--err");
+    detail.append(el("p", { class: "callout__title", text: "Checking invitation…" }));
+    try {
+      const p = await call(`/invitations/preview?token=${encodeURIComponent(state.inviteToken)}`, { auth: false });
+      clear(detail).append(
+        el("p", { class: "callout__title", text: `Join ${p.organization_name}` }),
+        el("p", { class: "callout__text", text: `${p.email} · ${p.role_name} role · expires ${fmt.date(p.expires_at)}` }));
+      $("#inv-password-field").hidden = !p.requires_password;
+      $("#inv-password").required = Boolean(p.requires_password);
+      submit.disabled = false;
+    } catch (err) {
+      clear(detail);
+      if (err.status === 0 || err.status >= 500) {
+        detail.classList.add("callout--warn");
+        const retry = el("button", { class: "btn btn--secondary btn--sm", type: "button", onclick: loadInvitePreview }, "Retry");
+        detail.append(
+          el("p", { class: "callout__title", text: "Invitation could not be checked" }),
+          el("p", { class: "callout__text", text: `${err.message} Your link has not been marked invalid.` }),
+          retry);
+      } else {
+        detail.classList.add("callout--err");
+        detail.append(
+          el("p", { class: "callout__title", text: "This invitation is no longer valid" }),
+          el("p", { class: "callout__text", text: "It may have expired or already been used. Ask for a new one." }));
+      }
+    }
+  }
 
   async function boot() {
     wireAuth();
@@ -2088,34 +2672,18 @@
     if (inviteToken) {
       state.inviteToken = inviteToken;
       showAuth("invite");
-      try {
-        const p = await call(`/invitations/preview?token=${encodeURIComponent(inviteToken)}`, { auth: false });
-        clear($("#invite-detail")).append(
-          el("p", { class: "callout__title", text: `Join ${p.organization_name}` }),
-          el("p", { class: "callout__text", text: `${p.email} · ${p.role_name} role · expires ${fmt.date(p.expires_at)}` }));
-        $("#inv-password-field").hidden = !p.requires_password;
-        if (p.requires_password) $("#inv-password").required = true;
-      } catch (_) {
-        clear($("#invite-detail")).append(
-          el("p", { class: "callout__title", text: "This invitation is no longer valid" }),
-          el("p", { class: "callout__text", text: "It may have expired or already been used. Ask for a new one." }));
-        $("#form-invite").querySelector("[type=submit]").disabled = true;
-      }
+      await loadInvitePreview();
       return;
     }
 
     if (!session.load()) { showAuth("login"); return; }
 
+    signedOut = false;
     try {
-      await loadProfile();
-      paintIdentity();
-      $("#auth").hidden = true;
-      $("#app").hidden = false;
-      badgeCount();
-      route();
-    } catch (_) {
-      session.clear();
-      showAuth("login");
+      await activateSession();
+    } catch (err) {
+      if (isAbort(err) || isAuthoritativeAuthError(err)) return;
+      showSessionRetry(err);
     }
   }
 
