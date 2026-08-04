@@ -1,9 +1,12 @@
 package identity
 
 import (
+	"context"
+	"errors"
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/satym-in/tenant-saas-backend/internal/authz"
 	"github.com/satym-in/tenant-saas-backend/internal/tenancy"
 	"github.com/satym-in/tenant-saas-backend/pkg/apiresponse"
@@ -20,7 +23,11 @@ import (
 // post-auth" rule from the architecture design (Phase 2.2), which exists
 // specifically to prevent a valid token for tenant A being replayed with an
 // X-Tenant-ID/subdomain for tenant B to read tenant B's data.
-func RequireAuth(jwtSecret string) gin.HandlerFunc {
+type CredentialStateValidator interface {
+	ValidateCredentialState(ctx context.Context, tenantID, userID uuid.UUID) error
+}
+
+func RequireAuth(jwtSecret string, validator CredentialStateValidator) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		// An earlier middleware in the chain (internal/apikeys) may have already
 		// authenticated this request with an API key. Requiring a JWT as well would
@@ -55,6 +62,16 @@ func RequireAuth(jwtSecret string) gin.HandlerFunc {
 		if err := tenancy.OverrideFromJWT(c, claims.TenantID); err != nil {
 			apiresponse.Error(c, apperror.CodeTenantMismatch.HTTPStatus(), string(apperror.CodeTenantMismatch), err.Error())
 			return
+		}
+		if validator != nil {
+			if err := validator.ValidateCredentialState(c.Request.Context(), claims.TenantID, claims.UserID); err != nil {
+				if errors.Is(err, ErrTenantInactive) || errors.Is(err, ErrUserInactive) {
+					apiresponse.Error(c, apperror.CodeForbidden.HTTPStatus(), string(apperror.CodeForbidden), "account or organization is not active")
+				} else {
+					apiresponse.Error(c, apperror.CodeInternal.HTTPStatus(), string(apperror.CodeInternal), "failed to validate credential state")
+				}
+				return
+			}
 		}
 
 		c.Set(authz.CtxUserID, claims.UserID)
