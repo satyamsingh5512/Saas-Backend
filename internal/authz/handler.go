@@ -1,7 +1,10 @@
 package authz
 
 import (
+	"fmt"
 	"net/http"
+	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -58,7 +61,7 @@ type createRoleRequest struct {
 
 // CreateRole handles POST /api/v1/roles.
 func (h *Handler) CreateRole(c *gin.Context) {
-	tenantID, ok := tenantIDFromGin(c)
+	actorID, tenantID, ok := requesterIDsFromGin(c)
 	if !ok {
 		apiresponse.Error(c, http.StatusUnauthorized, string(apperror.CodeUnauthorized), "authentication required")
 		return
@@ -70,7 +73,7 @@ func (h *Handler) CreateRole(c *gin.Context) {
 		return
 	}
 
-	role, err := h.svc.CreateRole(c.Request.Context(), tenantID, req.Name, req.Description, req.PermissionCodes)
+	role, err := h.svc.CreateRole(c.Request.Context(), tenantID, actorID, req.Name, req.Description, req.PermissionCodes)
 	if err != nil {
 		respondErr(c, err)
 		return
@@ -79,7 +82,49 @@ func (h *Handler) CreateRole(c *gin.Context) {
 }
 
 type updateRolePermissionsRequest struct {
-	PermissionCodes []string `json:"permission_codes" binding:"required"`
+	PermissionCodes *[]string `json:"permission_codes" binding:"required"`
+	Revision        *string   `json:"revision"`
+}
+
+func parseBodyRoleRevision(value string) (*time.Time, error) {
+	revision, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(value))
+	if err != nil {
+		return nil, err
+	}
+	return &revision, nil
+}
+
+// parseIfMatchRoleRevision accepts exactly one strong entity-tag. If-Match uses
+// strong comparison, so weak tags, the wildcard, tag lists, and malformed
+// quoting must be rejected rather than normalized into a usable revision.
+func parseIfMatchRoleRevision(value string) (*time.Time, error) {
+	value = strings.TrimSpace(value)
+	if len(value) < 2 || value[0] != '"' || value[len(value)-1] != '"' {
+		return nil, fmt.Errorf("expected one quoted strong entity-tag")
+	}
+
+	revision, err := time.Parse(time.RFC3339Nano, value[1:len(value)-1])
+	if err != nil {
+		return nil, err
+	}
+	return &revision, nil
+}
+
+// GetRolePermissions handles GET /api/v1/roles/:roleID/permissions.
+func (h *Handler) GetRolePermissions(c *gin.Context) {
+	roleID, err := uuid.Parse(c.Param("roleID"))
+	if err != nil {
+		apiresponse.Error(c, http.StatusBadRequest, string(apperror.CodeValidation), "invalid role id")
+		return
+	}
+
+	permissions, err := h.svc.GetRolePermissions(c.Request.Context(), roleID)
+	if err != nil {
+		respondErr(c, err)
+		return
+	}
+	c.Header("ETag", `"`+permissions.Revision+`"`)
+	apiresponse.Success(c, http.StatusOK, permissions)
 }
 
 // UpdateRolePermissions handles PUT /api/v1/roles/:roleID/permissions.
@@ -87,7 +132,7 @@ type updateRolePermissionsRequest struct {
 // Service.UpdateRolePermissions for why system roles can have permissions
 // edited but never their slug/IsSystem flag).
 func (h *Handler) UpdateRolePermissions(c *gin.Context) {
-	tenantID, ok := tenantIDFromGin(c)
+	actorID, tenantID, ok := requesterIDsFromGin(c)
 	if !ok {
 		apiresponse.Error(c, http.StatusUnauthorized, string(apperror.CodeUnauthorized), "authentication required")
 		return
@@ -104,21 +149,61 @@ func (h *Handler) UpdateRolePermissions(c *gin.Context) {
 		return
 	}
 
-	if err := h.svc.UpdateRolePermissions(c.Request.Context(), tenantID, roleID, req.PermissionCodes); err != nil {
+	var expectedRevision *time.Time
+	if req.Revision != nil {
+		expectedRevision, err = parseBodyRoleRevision(*req.Revision)
+		if err != nil {
+			apiresponse.Error(c, http.StatusBadRequest, string(apperror.CodeValidation), "invalid revision")
+			return
+		}
+	}
+	ifMatchValues := c.Request.Header.Values("If-Match")
+	if len(ifMatchValues) > 0 {
+		if len(ifMatchValues) != 1 {
+			apiresponse.Error(c, http.StatusBadRequest, string(apperror.CodeValidation), "invalid If-Match revision")
+			return
+		}
+		headerRevision, parseErr := parseIfMatchRoleRevision(ifMatchValues[0])
+		if parseErr != nil {
+			apiresponse.Error(c, http.StatusBadRequest, string(apperror.CodeValidation), "invalid If-Match revision")
+			return
+		}
+		if expectedRevision != nil && !expectedRevision.Equal(*headerRevision) {
+			apiresponse.Error(c, http.StatusBadRequest, string(apperror.CodeValidation), "revision and If-Match do not agree")
+			return
+		}
+		expectedRevision = headerRevision
+	}
+
+	permissions, err := h.svc.UpdateRolePermissions(
+		c.Request.Context(), tenantID, actorID, roleID, *req.PermissionCodes, expectedRevision,
+	)
+	if err != nil {
 		respondErr(c, err)
 		return
 	}
-	apiresponse.Success(c, http.StatusOK, gin.H{"message": "role permissions updated"})
+	c.Header("ETag", `"`+permissions.Revision+`"`)
+	apiresponse.Success(c, http.StatusOK, gin.H{
+		"message":          "role permissions updated",
+		"role_id":          permissions.RoleID,
+		"permission_codes": permissions.PermissionCodes,
+		"revision":         permissions.Revision,
+	})
 }
 
 // DeleteRole handles DELETE /api/v1/roles/:roleID.
 func (h *Handler) DeleteRole(c *gin.Context) {
+	actorID, _, ok := requesterIDsFromGin(c)
+	if !ok {
+		apiresponse.Error(c, http.StatusUnauthorized, string(apperror.CodeUnauthorized), "authentication required")
+		return
+	}
 	roleID, err := uuid.Parse(c.Param("roleID"))
 	if err != nil {
 		apiresponse.Error(c, http.StatusBadRequest, string(apperror.CodeValidation), "invalid role id")
 		return
 	}
-	if err := h.svc.DeleteRole(c.Request.Context(), roleID); err != nil {
+	if err := h.svc.DeleteRole(c.Request.Context(), actorID, roleID); err != nil {
 		respondErr(c, err)
 		return
 	}
@@ -153,7 +238,7 @@ func (h *Handler) AssignRole(c *gin.Context) {
 
 // RevokeRole handles POST /api/v1/roles/revoke.
 func (h *Handler) RevokeRole(c *gin.Context) {
-	_, tenantID, ok := requesterIDsFromGin(c)
+	actorID, tenantID, ok := requesterIDsFromGin(c)
 	if !ok {
 		apiresponse.Error(c, http.StatusUnauthorized, string(apperror.CodeUnauthorized), "authentication required")
 		return
@@ -165,7 +250,7 @@ func (h *Handler) RevokeRole(c *gin.Context) {
 		return
 	}
 
-	if err := h.svc.RevokeRole(c.Request.Context(), tenantID, req.UserID, req.RoleID); err != nil {
+	if err := h.svc.RevokeRole(c.Request.Context(), tenantID, actorID, req.UserID, req.RoleID); err != nil {
 		respondErr(c, err)
 		return
 	}
