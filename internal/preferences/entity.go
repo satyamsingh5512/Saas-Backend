@@ -37,13 +37,19 @@ func (Preferences) TableName() string { return "user_preferences" }
 //
 // Returning defaults for a missing row keeps GET idempotent and side-effect free:
 // the row is created on first write, not on first read.
+//
+// Theme defaults to dark, not system: the dashboard's surface system is designed
+// on true black and that is the intended first impression, so following the OS
+// would hand a light-mode desktop the secondary experience. The web client
+// resolves the same default before first paint (see web/assets/theme.js), and
+// "system" remains available as an explicit choice.
 func Defaults(tenantID, userID uuid.UUID) *Preferences {
 	return &Preferences{
 		UserID:             userID,
 		TenantID:           tenantID,
 		Timezone:           "UTC",
 		Locale:             "en-US",
-		Theme:              ThemeSystem,
+		Theme:              ThemeDark,
 		EmailNotifications: true,
 	}
 }
