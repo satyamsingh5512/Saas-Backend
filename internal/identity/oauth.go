@@ -244,6 +244,9 @@ func (s *Service) OAuthCallback(ctx context.Context, provider, code, stateRaw st
 	if err != nil {
 		return nil, apperror.New(apperror.CodeNotFound, "tenant not found")
 	}
+	if tenant.Status != "active" {
+		return nil, apperror.New(apperror.CodeForbidden, "organization is not active")
+	}
 
 	var oauth2Cfg *oauth2.Config
 	switch provider {
@@ -275,6 +278,12 @@ func (s *Service) OAuthCallback(ctx context.Context, provider, code, stateRaw st
 
 	// Already linked? Log the existing user in directly.
 	if existing, err := s.repo.FindOAuthAccount(ctx, provider, profile.ProviderUserID); err == nil {
+		if existing.TenantID != tenant.ID {
+			return nil, apperror.New(apperror.CodeUnauthorized, "oauth identity is linked to another organization")
+		}
+		if err := s.repo.ValidateCredentialState(ctx, existing.TenantID, existing.UserID); err != nil {
+			return nil, apperror.New(apperror.CodeForbidden, "account or organization is not active")
+		}
 		user, err := s.repo.FindByID(ctxWithTenantID(ctx, existing.TenantID), existing.UserID)
 		if err != nil {
 			return nil, apperror.New(apperror.CodeUnauthorized, "linked account no longer exists")
@@ -291,6 +300,9 @@ func (s *Service) OAuthCallback(ctx context.Context, provider, code, stateRaw st
 	// linking), or provision a brand-new user if no match exists.
 	var user *User
 	if existingUser, err := s.repo.FindByEmailInTenant(scopedCtx, profile.Email); err == nil {
+		if existingUser.Status == StatusDisabled {
+			return nil, apperror.New(apperror.CodeForbidden, "account is disabled")
+		}
 		user = existingUser
 	} else {
 		user = &User{
@@ -324,6 +336,9 @@ func (s *Service) OAuthCallback(ctx context.Context, provider, code, stateRaw st
 		return nil, apperror.Wrap(apperror.CodeInternal, "failed to link oauth account", err)
 	}
 
+	if err := s.repo.ValidateCredentialState(ctx, tenant.ID, user.ID); err != nil {
+		return nil, apperror.New(apperror.CodeForbidden, "account or organization is not active")
+	}
 	roleSlug, _ := s.roles.PrimaryRoleSlug(scopedCtx, user.ID)
 	tokens, err := s.issueTokenPair(scopedCtx, tenant.ID, user, roleSlug)
 	if err != nil {
