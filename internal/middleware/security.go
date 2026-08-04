@@ -90,8 +90,8 @@ func CORS(allowedOrigins []string) gin.HandlerFunc {
 		h.Set("Access-Control-Allow-Origin", origin)
 		h.Set("Access-Control-Allow-Credentials", "true")
 		h.Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
-		h.Set("Access-Control-Allow-Headers", "Authorization, Content-Type, "+HeaderRequestID+", X-Tenant-ID")
-		h.Set("Access-Control-Expose-Headers", HeaderRequestID)
+		h.Set("Access-Control-Allow-Headers", "Authorization, Content-Type, "+HeaderRequestID+", X-Tenant-ID, If-Match")
+		h.Set("Access-Control-Expose-Headers", HeaderRequestID+", ETag")
 		h.Set("Access-Control-Max-Age", strconv.Itoa(int(maxAge.Seconds())))
 		// Responses vary by Origin, so caches must not serve one origin's
 		// response to another.
