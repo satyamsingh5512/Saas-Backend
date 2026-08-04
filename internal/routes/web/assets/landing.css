@@ -1,0 +1,1227 @@
+/* ============================================================================
+   Tenancy — landing page
+   ----------------------------------------------------------------------------
+   Layered on top of app.css, which is loaded first and owns the whole design
+   system: the neutral ramp, ink ladder, type and spacing scales, radii,
+   elevation, motion tokens, and the shared primitives this file reuses rather
+   than restates (.btn, .badge, .icon, .segment, .skel, .logo, .skip-link).
+
+   Three rules keep the two files from drifting:
+
+     1. No colour, duration or easing literal below. Every value resolves through
+        a token, so the page follows a scheme change or a ramp edit
+        automatically — including the dark default and the CI-enforced contrast
+        floor.
+     2. Nothing here is scheme-aware. There is no `prefers-color-scheme` block,
+        for the same reason app.css has only one: the ramp re-points itself, so a
+        rule written against `--surface` is already correct in both schemes.
+     3. Display type is the one place this file goes beyond app.css's scale,
+        which tops out at 28px because that is a KPI figure. Headlines are fluid
+        `clamp()` in rem — never px — so a reader who raised their browser's
+        default text size still gets the increase.
+
+   ── One structural rule, added after review ────────────────────────────────
+   Every section gets a different structural device. An earlier version of this
+   file built eight consecutive sections out of the same bordered, rounded,
+   softly-shadowed rectangle, and the effect was that the reader stopped seeing
+   sections and started seeing a template — the single strongest tell that a page
+   was assembled rather than designed. A frame is now something a section has to
+   earn by being a *surface*: the product figure, the lifecycle panel, the code
+   block and the plan cards are framed because each one is a thing you could
+   point at. Everything else is built from rules, indents and type:
+
+     hero          glow + grid texture + a content-bearing product figure
+     problem       ruled ledger — index, claim, no boxes
+     lifecycle     framed panel (a product surface)
+     architecture  a continuous spine with layers hanging off it
+     capabilities  ruled definition grid, asymmetric, no icons
+     security      hanging labels against a single left rule
+     code          framed panel (a code surface)
+     pricing       cards (a price is a discrete object; cards are right here)
+     faq           hairline-divided disclosure list
+     close         inverted surface, no glow
+
+   CSP shapes several decisions rather than only forbidding things. style-src
+   'self' blocks the style *attribute*, so: the figure's meter widths are
+   modifier classes, and reveal stagger and the pointer spotlight read custom
+   properties that JS sets through CSSOM. Programmatic property assignment is not
+   restricted; parsed inline style is.
+   ========================================================================== */
+
+/* ──────────────────────────────── Layout ─────────────────────────────── */
+
+/* One measure for every band, so nav, hero, sections and footer align on the
+   same two edges down the whole page. 1120 is wider than the app's content
+   column deliberately: marketing prose reads at a longer line than a data table.
+   Centred composition, which is what nearly every developer-tool landing page
+   converges on, because it is stable and scans fast. */
+.ld-shell {
+  width: 100%;
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 0 var(--sp-24);
+}
+
+/* Vertical rhythm is deliberately not uniform. Equal padding on every band is
+   the other half of the template effect: it flattens the story so the problem
+   statement gets the same weight as the footer. Bands that carry an argument get
+   room; bands that carry a fact are tighter. */
+.band { padding: clamp(64px, 10vh, 108px) 0; }
+.band--tight { padding: var(--sp-40) 0; }
+.band--roomy { padding: clamp(88px, 14vh, 148px) 0; }
+/* Alternating bands are separated by a hairline and a surface change rather than
+   by extra whitespace: on black, a rule is cheaper than 40px of nothing. */
+.band--alt {
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+
+/* ────────────────────────────────── Nav ─────────────────────────────── */
+
+.ld-nav {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  background: color-mix(in srgb, var(--chrome) 82%, transparent);
+  backdrop-filter: saturate(150%) blur(10px);
+  border-bottom: 1px solid transparent;
+  transition: border-color var(--t) var(--ease), background-color var(--t) var(--ease);
+}
+/* The hairline arrives only once the page has scrolled: at rest the nav should
+   read as part of the hero, and a permanent rule under a transparent bar looks
+   like a seam. landing.js toggles this from a sentinel IntersectionObserver
+   rather than a scroll listener, so there is no per-frame work. */
+.ld-nav.is-stuck {
+  background: color-mix(in srgb, var(--chrome) 92%, transparent);
+  border-bottom-color: var(--border);
+}
+.ld-nav__inner {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-24);
+  width: 100%;
+  max-width: 1120px;
+  /* 56px: a control height, not a spacing step — it holds a 32px button with
+     12px of optical clearance above and below. */
+  height: 56px;
+  margin: 0 auto;
+  padding: 0 var(--sp-24);
+}
+
+.ld-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-9);
+  color: var(--fg);
+  border-radius: var(--r-md);
+}
+.ld-brand:focus-visible { outline: none; box-shadow: var(--ring); }
+
+.ld-nav__links {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-18);
+  margin-left: var(--sp-14);
+  font-size: var(--fs-13);
+}
+.ld-nav__links a {
+  position: relative;
+  color: var(--fg-muted);
+  border-radius: var(--r-sm);
+  transition: color var(--t-fast) var(--ease);
+}
+.ld-nav__links a:hover { color: var(--fg); }
+.ld-nav__links a:focus-visible { outline: none; box-shadow: var(--ring); }
+/* A 1px underline that grows from the left edge, not from the centre. Centre-out
+   is the more decorative of the two and reads as an effect; left-to-right reads
+   as the link being read. transform only. */
+.ld-nav__links a::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -4px;
+  height: 1px;
+  background: var(--brand-fg);
+  transform: scaleX(0);
+  transform-origin: left;
+  transition: transform var(--t) var(--ease);
+}
+.ld-nav__links a:hover::after { transform: scaleX(1); }
+
+.ld-nav__actions { display: flex; align-items: center; gap: var(--sp-8); margin-left: auto; }
+
+/* Watched by landing.js to decide when the nav has left the top of the document.
+   Absolutely positioned so inserting it costs no layout: a 1px element in normal
+   flow would push the page down by a pixel, visible as a jump on a page that
+   also has a sticky header. */
+.nav-sentinel { position: absolute; top: 0; left: 0; width: 1px; height: 1px; pointer-events: none; }
+
+/* ───────────────────────────────── Hero ─────────────────────────────── */
+
+.hero { position: relative; overflow: hidden; }
+
+/* Two brand radials behind the headline and nothing else — the only saturated
+   colour above the fold, and now the only glow on the page. There used to be a
+   second one behind the closing CTA; two identical washes at either end of a
+   scroll is a symmetry nobody designs on purpose, and it made the end of the page
+   read as a copy of the start. Mixed from the brand token so it inverts
+   correctly: on white the same mix is a faint wash rather than a glow. On a
+   pseudo-element so it cannot intercept a pointer or a text selection. */
+.hero::before {
+  content: "";
+  position: absolute;
+  /* Drawing coordinates: the glow is pulled above the viewport so only its lower
+     falloff shows, which is what makes it read as light rather than as a shape.
+     Off-centre horizontally — a perfectly centred radial behind a centred
+     headline is the most generated-looking arrangement available. */
+  inset: -300px 0 auto;
+  height: 760px;
+  pointer-events: none;
+  background:
+    radial-gradient(44% 50% at 42% 40%, color-mix(in srgb, var(--brand-600) 30%, transparent), transparent 68%),
+    radial-gradient(34% 42% at 78% 16%, color-mix(in srgb, var(--brand-800) 24%, transparent), transparent 70%);
+}
+
+/* Hairline grid, drawn in CSS so no image asset or extra origin is involved.
+   56px is the texture's pitch, chosen against the mask falloff rather than
+   against any element's padding. Mixed from --fg so it is a light grid in dark
+   and a dark grid in light. */
+.hero::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image:
+    linear-gradient(to right, color-mix(in srgb, var(--fg) 5%, transparent) 1px, transparent 1px),
+    linear-gradient(to bottom, color-mix(in srgb, var(--fg) 5%, transparent) 1px, transparent 1px);
+  background-size: 56px 56px;
+  mask-image: radial-gradient(70% 58% at 50% 10%, #000 0%, transparent 78%);
+}
+
+.hero__inner {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: clamp(56px, 10vh, 104px) var(--sp-24) 0;
+  text-align: center;
+}
+
+/* Live status pill. Three states, written by landing.js as a data attribute:
+   loading, ok, down. Colour is never the only signal — the text changes too. */
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-8);
+  padding: var(--sp-5) var(--sp-12) var(--sp-5) var(--sp-10);
+  background: var(--brand-subtle);
+  border: 1px solid color-mix(in srgb, var(--brand-600) 24%, transparent);
+  border-radius: var(--r-full);
+  color: var(--brand-fg);
+  font-size: var(--fs-12);
+  font-weight: 500;
+}
+.pill__dot { width: 6px; height: 6px; flex: none; border-radius: var(--r-full); background: currentColor; }
+.pill[data-state="ok"] {
+  background: var(--ok-bg);
+  border-color: color-mix(in srgb, var(--ok-fg) 30%, transparent);
+  color: var(--ok-fg);
+}
+/* The breathing dot is the page's only looping animation, and it is 6px of
+   opacity on an element genuinely reporting live state. Anything ambient and
+   larger would be decoration. */
+.pill[data-state="ok"] .pill__dot { animation: pill-pulse 2.4s var(--ease) infinite; }
+.pill[data-state="down"] {
+  background: var(--err-bg);
+  border-color: color-mix(in srgb, var(--err-fg) 30%, transparent);
+  color: var(--err-fg);
+}
+@keyframes pill-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.45; transform: scale(0.82); }
+}
+
+.hero__title {
+  max-width: 22ch;
+  margin-top: var(--sp-24);
+  /* 36 → 62px. Tight tracking is load-bearing at display sizes: the spacing that
+     makes 13px legible makes 60px look loose and cheap. */
+  font-size: clamp(2.25rem, 5.4vw, 3.875rem);
+  font-weight: 620;
+  line-height: 1.05;
+  letter-spacing: -0.034em;
+  text-wrap: balance;
+}
+/* The second clause drops to subtle ink instead of becoming a second line of
+   copy. It carries the contrast the sentence needs without a second type size. */
+.hero__title-dim { color: var(--fg-subtle); }
+
+.hero__sub {
+  max-width: 64ch;
+  margin-top: var(--sp-20);
+  color: var(--fg-muted);
+  font-size: var(--fs-16);
+  line-height: 1.62;
+  text-wrap: pretty;
+}
+.hero__cta { display: flex; flex-wrap: wrap; justify-content: center; gap: var(--sp-10); margin-top: var(--sp-28); }
+.hero__note { max-width: 48ch; margin-top: var(--sp-16); color: var(--fg-subtle); font-size: var(--fs-12); line-height: 1.55; }
+
+/* ──────────────────────── Product figure (stage) ────────────────────── */
+
+/* The workspace, drawn from the real design system. It carries real labels and
+   figures rather than grey bars: a row of grey bars is the visual language of a
+   loading skeleton, so the previous version of this figure said "a UI goes here"
+   instead of showing one. Nothing in it is a captured image, so it cannot go
+   stale against a redesign. */
+.stage {
+  width: 100%;
+  max-width: 980px;
+  margin-top: clamp(40px, 7vh, 72px);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-xl);
+  box-shadow: var(--edge), var(--sh-xl);
+  overflow: hidden;
+  text-align: left;
+}
+
+.stage__bar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-12);
+  height: 38px; /* control height */
+  padding: 0 var(--sp-14);
+  background: var(--chrome);
+  border-bottom: 1px solid var(--border);
+}
+.stage__dots { display: inline-flex; gap: var(--sp-6); }
+.stage__dots i { width: 8px; height: 8px; border-radius: var(--r-full); background: var(--border-strong); }
+.stage__path { color: var(--fg-subtle); font-family: var(--mono); font-size: var(--fs-11); }
+.stage__path em { color: var(--fg-muted); font-style: normal; }
+.stage__kbd {
+  margin-left: auto;
+  padding: var(--sp-2) var(--sp-8);
+  background: var(--control);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  color: var(--fg-subtle);
+  font-family: var(--mono);
+  font-size: var(--fs-10);
+}
+
+.stage__body { display: grid; grid-template-columns: 188px minmax(0, 1fr); }
+
+.stage__side {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-12);
+  background: var(--chrome);
+  border-right: 1px solid var(--border);
+}
+.stage__org {
+  display: grid;
+  grid-template-columns: 22px 1fr;
+  grid-template-rows: auto auto;
+  align-items: center;
+  gap: 0 var(--sp-9);
+  padding: var(--sp-8) var(--sp-9);
+  margin-bottom: var(--sp-10);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  box-shadow: var(--edge);
+}
+.stage__mark {
+  grid-row: span 2;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--r-sm);
+  background: linear-gradient(140deg, var(--brand-500), var(--brand-700));
+}
+.stage__org b { font-size: var(--fs-12); font-weight: 600; letter-spacing: -0.01em; }
+.stage__org em { color: var(--fg-subtle); font-size: var(--fs-10); font-style: normal; }
+.stage__nav {
+  padding: var(--sp-7) var(--sp-9);
+  border-radius: var(--r-md);
+  color: var(--fg-muted);
+  font-size: var(--fs-12);
+}
+.stage__nav--on { background: var(--brand-subtle); color: var(--brand-fg); font-weight: 600; }
+
+.stage__main { display: flex; flex-direction: column; gap: var(--sp-14); padding: var(--sp-16); background: var(--canvas); }
+
+.stage__meters { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--sp-10); }
+.meter-mini {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-6);
+  padding: var(--sp-11) var(--sp-12);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  box-shadow: var(--edge);
+}
+.meter-mini b {
+  color: var(--fg-subtle);
+  font-size: var(--fs-10);
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+.meter-mini em {
+  color: var(--fg);
+  font-size: var(--fs-16);
+  font-style: normal;
+  font-weight: 620;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+.meter-mini em s { color: var(--fg-subtle); font-size: var(--fs-11); font-weight: 400; text-decoration: none; }
+.meter-mini__track { height: 4px; border-radius: var(--r-full); background: var(--fill); overflow: hidden; }
+.meter-mini__fill { display: block; height: 100%; border-radius: var(--r-full); background: var(--brand-600); }
+/* Widths as modifier classes: style-src 'self' blocks the attribute that would
+   otherwise carry them, and these are content, not state. */
+.meter-mini__fill--18 { width: 18%; }
+.meter-mini__fill--24 { width: 24%; }
+/* Past 80% the quota bar warns, exactly as it does in the real dashboard —
+   the figure should not depict a state the product cannot produce. */
+.meter-mini__fill--82 { width: 82%; background: var(--warn-fg); }
+
+.stage__table {
+  padding: var(--sp-4) var(--sp-14) var(--sp-8);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  box-shadow: var(--edge);
+}
+.stage__tr {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) 78px;
+  align-items: center;
+  gap: var(--sp-12);
+  padding: var(--sp-10) 0;
+  border-bottom: 1px solid var(--border);
+  font-size: var(--fs-12);
+}
+.stage__tr:last-child { border-bottom: 0; }
+.stage__tr b { color: var(--fg); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.stage__tr em { color: var(--fg-muted); font-style: normal; }
+.stage__tr--head { padding: var(--sp-9) 0; }
+.stage__tr--head b {
+  color: var(--fg-subtle);
+  font-size: var(--fs-10);
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+.tag {
+  justify-self: start;
+  padding: var(--sp-1) var(--sp-8);
+  background: var(--fill);
+  border-radius: var(--r-full);
+  color: var(--fg-muted);
+  font-size: var(--fs-10);
+  font-style: normal;
+}
+.tag--ok { background: var(--ok-bg); color: var(--ok-fg); }
+
+/* ──────────────────────────────── Metrics ───────────────────────────── */
+
+.metrics { border-bottom: 1px solid var(--border); }
+/* Not an even five-up. The first three are counted quantities and the last two
+   are single digits that mean something different ("one binary", "zero
+   dependencies"), so they sit slightly apart with a rule between rather than
+   pretending to be the same kind of fact. */
+.metrics__grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) auto repeat(2, minmax(0, 0.8fr));
+  gap: var(--sp-24);
+  align-items: start;
+}
+.metrics__split { width: 1px; align-self: stretch; background: var(--border); }
+.metric { display: flex; flex-direction: column; gap: var(--sp-6); }
+.metric__n {
+  /* 26 → 34px. Tabular figures so the counting animation cannot reflow the label
+     under it as digit widths change. */
+  font-size: clamp(1.625rem, 2.6vw, 2.125rem);
+  font-weight: 620;
+  letter-spacing: -0.03em;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+.metric__l { color: var(--fg-subtle); font-size: var(--fs-12); line-height: 1.45; }
+
+/* ─────────────────────────────── Sections ───────────────────────────── */
+
+.sec { max-width: 64ch; margin-bottom: var(--sp-40); }
+.sec--center { margin-left: auto; margin-right: auto; text-align: center; }
+
+/* The eyebrow is a rule plus a word, not a coloured caps label floating alone.
+   Eight identical kicker/headline/subhead stacks was another symmetry that made
+   the sections read as one section repeated. */
+.kicker {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-10);
+  margin-bottom: var(--sp-14);
+  color: var(--brand-fg);
+  font-size: var(--fs-11);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.kicker::before {
+  content: "";
+  width: 20px;
+  height: 1px;
+  flex: none;
+  background: currentColor;
+}
+.sec--center .kicker { justify-content: center; }
+
+.sec__title {
+  /* 24 → 36px. */
+  font-size: clamp(1.5rem, 3vw, 2.25rem);
+  font-weight: 600;
+  line-height: 1.16;
+  letter-spacing: -0.026em;
+  text-wrap: balance;
+}
+.sec__sub { margin-top: var(--sp-12); color: var(--fg-muted); font-size: var(--fs-15); line-height: 1.62; text-wrap: pretty; }
+
+/* Inline code, sized to sit inside running prose without changing its leading. */
+.code {
+  padding: var(--sp-2) var(--sp-6);
+  background: var(--fill);
+  border-radius: var(--r-sm);
+  color: var(--fg);
+  font-family: var(--mono);
+  font-size: var(--fs-12);
+  white-space: nowrap;
+}
+
+/* Two-column split for sections whose heading can sit beside their content
+   rather than above it. Collapses at 1024 with the rest of the page. */
+.sec-split, .faq-split {
+  display: grid;
+  grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.15fr);
+  gap: clamp(32px, 5vw, 72px);
+  align-items: start;
+}
+.sec-split .sec, .faq-split .sec { margin-bottom: 0; position: sticky; top: 96px; }
+
+/* ─────────────────────── Problem — ruled ledger ─────────────────────── */
+
+/* A rule, an index, a claim. Four parallel statements of the same shape, and a
+   ruled list says "parallel" more economically than four boxes do. The rule is
+   2px and brand-tinted at the top of each entry, which is the section's whole
+   visual signature — it appears nowhere else on the page. */
+.faults {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: clamp(24px, 3vw, 40px);
+  list-style: none;
+}
+.fault { position: relative; padding-top: var(--sp-16); }
+/* The rule is a pseudo-element rather than a border so the reveal can scale it
+   on its own. Scaling the entry itself would squash the type horizontally for
+   the length of the transition, which is exactly the kind of animation that
+   draws attention to itself instead of to the content. */
+.fault::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: var(--err-fg);
+  transform-origin: left;
+}
+.fault__n {
+  display: block;
+  color: var(--err-fg);
+  font-family: var(--mono);
+  font-size: var(--fs-11);
+  letter-spacing: 0.08em;
+}
+.fault__title {
+  margin-top: var(--sp-12);
+  font-size: var(--fs-15);
+  font-weight: 600;
+  letter-spacing: -0.012em;
+  line-height: 1.3;
+  text-wrap: balance;
+}
+.fault__text { margin-top: var(--sp-10); color: var(--fg-muted); font-size: var(--fs-13); line-height: 1.62; }
+
+/* ─────────────────── Lifecycle demo — framed panel ─────────────────── */
+
+/* Framed, because it is a surface you operate: a tenant switch, a button, and a
+   result. That is what earns a border here. */
+.demo {
+  background: var(--canvas);
+  border: 1px solid var(--border);
+  border-radius: var(--r-xl);
+  box-shadow: var(--edge), var(--sh-lg);
+  overflow: hidden;
+}
+.demo__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-16);
+  padding: var(--sp-14) var(--sp-16);
+  background: var(--chrome);
+  border-bottom: 1px solid var(--border);
+}
+.demo__body { display: grid; grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.05fr); }
+
+/* The trace. Three states written by landing.js as data-state: pending
+   (default), active, done. The connector is a pseudo-element on the gutter, so
+   the line is one element per row and cannot drift out of alignment with its
+   dot. */
+.trace { list-style: none; padding: var(--sp-20); border-right: 1px solid var(--border); }
+.trace__step { display: flex; gap: var(--glyph-gap); }
+.trace__gutter { position: relative; display: flex; justify-content: center; width: 18px; flex: none; }
+.trace__dot {
+  position: relative;
+  z-index: 1;
+  width: 10px;
+  height: 10px;
+  margin-top: 5px; /* optical: centres the dot on the label's cap height */
+  border-radius: var(--r-full);
+  background: var(--fill);
+  border: 1px solid var(--border-strong);
+  transition: background-color var(--t) var(--ease),
+    border-color var(--t) var(--ease),
+    box-shadow var(--t) var(--ease),
+    transform var(--t) var(--ease);
+}
+.trace__step:not(:last-child) .trace__gutter::after {
+  content: "";
+  position: absolute;
+  top: 15px;
+  bottom: -6px;
+  width: 1px;
+  background: var(--border);
+}
+.trace__body { padding-bottom: var(--sp-20); min-width: 0; }
+.trace__label { display: block; color: var(--fg-subtle); font-size: var(--fs-13); font-weight: 500; transition: color var(--t) var(--ease); }
+.trace__detail {
+  display: block;
+  margin-top: var(--sp-4);
+  color: var(--fg-subtle);
+  font-family: var(--mono);
+  font-size: var(--fs-11);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+  opacity: 0.55;
+  transition: opacity var(--t) var(--ease), color var(--t) var(--ease);
+}
+
+.trace__step[data-state="active"] .trace__dot {
+  background: var(--brand-600);
+  border-color: var(--brand-600);
+  transform: scale(1.15);
+  box-shadow: 0 0 0 4px var(--brand-subtle);
+}
+.trace__step[data-state="active"] .trace__label { color: var(--fg); }
+.trace__step[data-state="active"] .trace__detail { color: var(--brand-fg); opacity: 1; }
+.trace__step[data-state="done"] .trace__dot { background: var(--ok-fg); border-color: var(--ok-fg); }
+.trace__step[data-state="done"] .trace__label { color: var(--fg-muted); }
+.trace__step[data-state="done"] .trace__detail { opacity: 1; }
+
+.demo__panels { display: flex; flex-direction: column; }
+.pane { display: flex; flex-direction: column; min-width: 0; }
+.pane + .pane { border-top: 1px solid var(--border); }
+.pane__head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+  padding: var(--sp-10) var(--sp-16);
+  background: var(--sunken);
+  border-bottom: 1px solid var(--border);
+  color: var(--fg-subtle);
+  font-size: var(--fs-11);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.pane__badge {
+  margin-left: auto;
+  padding: var(--sp-1) var(--sp-8);
+  background: var(--brand-subtle);
+  border-radius: var(--r-full);
+  color: var(--brand-fg);
+  font-family: var(--mono);
+  font-size: var(--fs-10);
+  letter-spacing: 0;
+  text-transform: none;
+}
+.pane__code { margin: 0; padding: var(--sp-16); color: var(--fg-muted); font-family: var(--mono); font-size: var(--fs-12); line-height: 1.7; overflow-x: auto; }
+.pane__rows { flex: 1; padding: var(--sp-12) var(--sp-16) var(--sp-16); }
+.pane__idle { color: var(--fg-subtle); font-size: var(--fs-12); line-height: 1.6; }
+
+/* A returned row, built by landing.js through textContent only. */
+.row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-10);
+  padding: var(--sp-9) 0;
+  border-bottom: 1px solid var(--border);
+  font-size: var(--fs-13);
+  animation: row-in var(--t) var(--ease) backwards;
+  /* Rows arrive in sequence off an index landing.js writes: they represent a
+     result set coming back, so appearing together would say less. */
+  animation-delay: calc(var(--i, 0) * 55ms);
+}
+.row:last-child { border-bottom: 0; }
+.row__id { color: var(--fg-subtle); font-family: var(--mono); font-size: var(--fs-11); }
+.row__name { flex: 1; min-width: 0; color: var(--fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@keyframes row-in { from { opacity: 0; transform: translateX(-6px); } to { opacity: 1; transform: none; } }
+
+.demo__foot {
+  padding: var(--sp-12) var(--sp-16);
+  background: var(--sunken);
+  border-top: 1px solid var(--border);
+  color: var(--fg-subtle);
+  font-size: var(--fs-12);
+  line-height: 1.55;
+}
+
+/* Token colours for the hand-marked code samples. Two hues and a grey: full
+   syntax highlighting needs a parser, and a sample this short does not earn one. */
+.tk-k { color: var(--brand-fg); }
+.tk-s { color: var(--ok-fg); }
+.tk-c { color: var(--fg-subtle); }
+
+/* ──────────────────── Architecture — a single spine ─────────────────── */
+
+/* Four bordered rows became one continuous spine with the layers hanging off it.
+   The layers are not four peer objects — they are one path a request travels in
+   order, and a connected diagram states that where four cards state the
+   opposite. The spine is also the section's signature: nothing else on the page
+   is built this way. */
+.arch { list-style: none; position: relative; padding-left: var(--sp-32); }
+/* The line itself, behind every node. scaleY from the top so the reveal draws it
+   downward, in the direction the request travels. */
+.arch::before {
+  content: "";
+  position: absolute;
+  top: var(--sp-8);
+  bottom: var(--sp-24);
+  left: 5px; /* drawing coordinate: centres the 1px line under the 11px node */
+  width: 1px;
+  background: linear-gradient(
+    to bottom,
+    var(--border-strong),
+    var(--border-strong) 82%,
+    transparent
+  );
+  transform-origin: top;
+}
+.arch__layer {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+  gap: clamp(24px, 4vw, 56px);
+  padding: var(--sp-8) 0 var(--sp-40);
+}
+.arch__layer:last-child { padding-bottom: 0; }
+/* The node on the spine. A ring rather than a filled dot, so the spine reads as
+   passing through it rather than stopping at it. */
+.arch__layer::before {
+  content: "";
+  position: absolute;
+  top: var(--sp-10);
+  left: calc(-1 * var(--sp-32));
+  width: 11px;
+  height: 11px;
+  border-radius: var(--r-full);
+  background: var(--canvas);
+  border: 2px solid var(--border-strong);
+  transition: border-color var(--t) var(--ease);
+}
+.arch__layer:hover::before { border-color: var(--brand-fg); }
+.arch__idx {
+  display: inline-block;
+  margin-bottom: var(--sp-8);
+  color: var(--brand-fg);
+  font-family: var(--mono);
+  font-size: var(--fs-11);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.arch__title { font-size: var(--fs-16); font-weight: 600; letter-spacing: -0.014em; }
+.arch__text { margin-top: var(--sp-10); color: var(--fg-muted); font-size: var(--fs-13); line-height: 1.62; }
+
+.arch__nodes { display: flex; flex-wrap: wrap; align-content: flex-start; gap: var(--sp-8); }
+.node {
+  padding: var(--sp-6) var(--sp-11);
+  background: var(--control);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  color: var(--fg-muted);
+  font-family: var(--mono);
+  font-size: var(--fs-11);
+  transition: color var(--t-fast) var(--ease), border-color var(--t-fast) var(--ease);
+}
+/* The nodes that do the security work, marked in brand rather than left for the
+   reader to spot. Well under 10% of the row, which is the rule for accent use. */
+.node--on { color: var(--brand-fg); border-color: color-mix(in srgb, var(--brand-600) 34%, transparent); }
+.arch__layer:hover .node { border-color: var(--border-strong); }
+
+/* ────────────────── Capabilities — ruled definition grid ────────────── */
+
+/* No cards and no icons. The icon-in-a-tinted-rounded-square was doing no work:
+   a padlock next to a heading that says "Authentication" repeats the heading in
+   a second alphabet, and six of them in a grid is the most template-like
+   arrangement on the internet. What replaces them is a hairline above each
+   entry and an asymmetric span pattern, so the eye gets its rhythm from the
+   layout instead of from decoration. */
+.defs {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: clamp(28px, 3.4vw, 44px) clamp(24px, 3vw, 40px);
+  list-style: none;
+}
+/* Asymmetric by intent: 3+3, then 2+2+2, then 6. Equal cells in equal rows is
+   the layout a generator reaches for; a deliberate rhythm is the tell that
+   someone chose. */
+.def { position: relative; grid-column: span 2; padding-top: var(--sp-16); }
+.def::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: var(--border-strong);
+  transform-origin: left;
+  transition: background-color var(--t) var(--ease);
+}
+.def--wide { grid-column: span 3; }
+.def--full { grid-column: span 6; }
+.def__title { font-size: var(--fs-15); font-weight: 600; letter-spacing: -0.012em; line-height: 1.3; text-wrap: balance; }
+.def__text { margin-top: var(--sp-10); color: var(--fg-muted); font-size: var(--fs-13); line-height: 1.62; }
+.def__facts { display: flex; flex-wrap: wrap; gap: var(--sp-6); margin-top: var(--sp-14); list-style: none; }
+.def__facts li {
+  padding: var(--sp-3) var(--sp-9);
+  background: var(--fill);
+  border-radius: var(--r-full);
+  color: var(--fg-subtle);
+  font-size: var(--fs-11);
+}
+/* The rule brightens on hover. That is the entire interaction — there is no card
+   to lift, and inventing one would put the decoration back. */
+.def:hover::before { background: var(--brand-fg); }
+
+/* ─────────────────── Security — hanging labels on a rule ────────────── */
+
+/* One left rule for the whole list, with the mechanism's name hanging in the
+   margin. Replaces five identical cards each carrying a green tick — in a list
+   of guarantees every row is affirmative, so a checkmark per row carried no
+   information. The label carries the mechanism instead, which is what a reviewer
+   is scanning for. */
+.creed { position: relative; }
+/* The left rule as a pseudo-element so the reveal can draw it downward, the same
+   way the architecture spine draws. A border-left could not be transformed
+   independently of the list's contents. */
+.creed::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 1px;
+  background: var(--border-strong);
+  transform-origin: top;
+}
+.creed__item {
+  display: grid;
+  grid-template-columns: 148px minmax(0, 1fr);
+  gap: var(--sp-20);
+  padding: var(--sp-16) 0 var(--sp-16) var(--sp-24);
+  position: relative;
+}
+.creed__item + .creed__item { border-top: 1px solid var(--border); }
+/* A short tick on the rule, aligned to the label. Marks the entry without
+   restating "yes" five times. */
+.creed__item::before {
+  content: "";
+  position: absolute;
+  top: calc(var(--sp-16) + 8px); /* optical: aligns to the label's cap height */
+  left: calc(-1 * var(--sp-1));
+  width: var(--sp-12);
+  height: 1px;
+  background: var(--border-strong);
+  transition: background-color var(--t) var(--ease), width var(--t) var(--ease);
+}
+.creed__item:hover::before { background: var(--brand-fg); width: var(--sp-20); }
+.creed__k {
+  color: var(--fg-subtle);
+  font-family: var(--mono);
+  font-size: var(--fs-11);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  line-height: 1.5;
+}
+.creed__v { color: var(--fg-muted); font-size: var(--fs-13); line-height: 1.68; }
+.creed__v b { color: var(--fg); font-weight: 600; }
+
+/* ────────────────────── Code — framed panel ─────────────────────────── */
+
+.code-card {
+  background: var(--canvas);
+  border: 1px solid var(--border);
+  border-radius: var(--r-xl);
+  box-shadow: var(--edge), var(--sh-lg);
+  overflow: hidden;
+}
+.code-card__head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-12);
+  padding: var(--sp-8) var(--sp-10) var(--sp-8) var(--sp-14);
+  background: var(--chrome);
+  border-bottom: 1px solid var(--border);
+}
+.tabs { display: inline-flex; gap: var(--sp-2); }
+.tab {
+  height: 28px; /* control height */
+  padding: 0 var(--sp-12);
+  border-radius: var(--r-md);
+  color: var(--fg-subtle);
+  font-size: var(--fs-12);
+  font-weight: 500;
+  transition: background-color var(--t-fast) var(--ease), color var(--t-fast) var(--ease);
+}
+.tab:hover { color: var(--fg); }
+.tab:focus-visible { outline: none; box-shadow: var(--ring); }
+.tab[aria-selected="true"] { background: var(--control); color: var(--fg); box-shadow: var(--edge), var(--sh-xs); }
+.code-card__copy { margin-left: auto; }
+.code-card__pre {
+  margin: 0;
+  padding: var(--sp-20);
+  color: var(--fg-muted);
+  font-family: var(--mono);
+  font-size: var(--fs-12);
+  line-height: 1.75;
+  overflow-x: auto;
+  tab-size: 2;
+}
+/* Panels fade in on switch. Opacity only: the block can be twenty lines tall and
+   sliding that much text is noise, not information. */
+.code-card__panel { animation: fade-in var(--t) var(--ease); }
+@keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+
+/* ─────────────────────── Pricing — cards, earned ───────────────────── */
+
+/* Cards here, unlike the sections above, because a price *is* a discrete
+   object: three of them, compared side by side, each a thing you choose. That is
+   what a card is for. */
+.plans { display: grid; grid-template-columns: repeat(auto-fit, minmax(268px, 1fr)); gap: var(--sp-14); align-items: stretch; }
+.plan {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-12);
+  padding: var(--sp-20);
+  background: var(--canvas);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  box-shadow: var(--edge);
+  transition: border-color var(--t) var(--ease), box-shadow var(--t) var(--ease);
+}
+.plan:hover { border-color: var(--border-strong); box-shadow: var(--edge), var(--sh-md); }
+/* Pointer spotlight, on the one section still made of cards. --mx/--my are
+   written by landing.js through CSSOM, which the CSP permits; a style attribute
+   would not be. Falls back to the card's centre so the gradient is never at 0,0
+   before the first pointer event. */
+.plan::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  opacity: 0;
+  background: radial-gradient(
+    260px circle at var(--mx, 50%) var(--my, 50%),
+    color-mix(in srgb, var(--brand-500) 10%, transparent),
+    transparent 70%
+  );
+  transition: opacity var(--t) var(--ease);
+}
+.plan:hover::after { opacity: 1; }
+/* Above the spotlight, or the gradient sits over the button and mutes it. */
+.plan > * { position: relative; z-index: 1; }
+/* The middle plan is marked, not enlarged: scaling one card breaks the baseline
+   the others share and makes the row look misaligned. */
+.plan--featured { border-color: color-mix(in srgb, var(--brand-600) 40%, transparent); }
+.plan__flag {
+  position: absolute;
+  top: calc(-1 * var(--sp-9));
+  left: var(--sp-20);
+  padding: var(--sp-2) var(--sp-9);
+  background: var(--brand-600);
+  border-radius: var(--r-full);
+  color: var(--brand-on);
+  font-size: var(--fs-10);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.plan__name { font-size: var(--fs-15); font-weight: 600; letter-spacing: -0.01em; }
+.plan__price { display: flex; align-items: baseline; gap: var(--sp-6); }
+.plan__amount {
+  /* 28 → 34px. */
+  font-size: clamp(1.75rem, 2.6vw, 2.125rem);
+  font-weight: 620;
+  letter-spacing: -0.03em;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+.plan__per { color: var(--fg-subtle); font-size: var(--fs-12); }
+.plan__limits { list-style: none; display: flex; flex-direction: column; gap: var(--sp-8); }
+.plan__limits li { display: flex; align-items: flex-start; gap: var(--sp-8); color: var(--fg-muted); font-size: var(--fs-13); line-height: 1.5; }
+.plan__limits .icon { color: var(--ok-fg); margin-top: 2px; /* optical */ }
+.plan__cta { margin-top: auto; }
+.plan__err { color: var(--err-fg); font-size: var(--fs-13); line-height: 1.6; }
+
+/* Skeleton state, using app.css's .skel so the shimmer is the dashboard's and
+   re-points with the ramp. */
+.plan--skel { gap: var(--sp-14); }
+.skel--title { width: 40%; height: 14px; }
+.skel--price { width: 55%; height: 26px; }
+.plan--skel .skel:not(.skel--title):not(.skel--price) { width: 82%; }
+.plan--skel .skel:last-child { width: 64%; }
+
+/* ──────────────────── FAQ — hairline disclosure list ───────────────── */
+
+/* Dividers, not cards. Six bordered boxes stacked vertically is a list wearing a
+   costume; the hairline says the same thing with less ink, and keeps the open
+   answer visually attached to its question. */
+.faq { border-top: 1px solid var(--border); }
+.qa { border-bottom: 1px solid var(--border); }
+.qa__q {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-12);
+  padding: var(--sp-16) var(--sp-4);
+  cursor: pointer;
+  color: var(--fg-muted);
+  font-size: var(--fs-14);
+  font-weight: 500;
+  line-height: 1.4;
+  list-style: none; /* Firefox draws its own marker without this */
+  transition: color var(--t-fast) var(--ease);
+}
+.qa__q::-webkit-details-marker { display: none; }
+.qa__q:hover { color: var(--fg); }
+.qa__q:focus-visible { outline: none; box-shadow: var(--ring); border-radius: var(--r-md); }
+.qa[open] .qa__q { color: var(--fg); }
+/* The arrow rotates a quarter turn rather than swapping glyph, so open and
+   closed are the same object in two positions. */
+.qa__chev { margin-left: auto; flex: none; color: var(--fg-subtle); transition: transform var(--t) var(--ease), color var(--t) var(--ease); }
+.qa[open] .qa__chev { transform: rotate(90deg); color: var(--brand-fg); }
+.qa__a { padding: 0 var(--sp-40) var(--sp-18) var(--sp-4); }
+.qa[open] .qa__a { animation: qa-in var(--t) var(--ease); }
+.qa__a p { color: var(--fg-muted); font-size: var(--fs-13); line-height: 1.68; }
+@keyframes qa-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+
+/* ────────────────────── Close — inverted surface ───────────────────── */
+
+/* An inverted band and a hairline, not a second brand glow. The page already
+   opens with a glow; repeating it here made the end of the scroll read as a copy
+   of the beginning. Inverting the surface is a stronger separation and costs no
+   colour. */
+.close-band {
+  padding: clamp(72px, 12vh, 128px) 0;
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+}
+.close { display: flex; flex-direction: column; align-items: center; text-align: center; }
+.close__title {
+  max-width: 24ch;
+  /* 24 → 36px. */
+  font-size: clamp(1.5rem, 3vw, 2.25rem);
+  font-weight: 620;
+  line-height: 1.14;
+  letter-spacing: -0.028em;
+  text-wrap: balance;
+}
+.close__sub { max-width: 54ch; margin-top: var(--sp-12); color: var(--fg-muted); font-size: var(--fs-14); line-height: 1.6; }
+.close__cta { display: flex; flex-wrap: wrap; justify-content: center; gap: var(--sp-10); margin-top: var(--sp-24); }
+
+/* ─────────────────────────────── Footer ────────────────────────────── */
+
+.ld-foot { padding: var(--sp-48) 0 var(--sp-32); border-top: 1px solid var(--border); background: var(--chrome); }
+.ld-foot__grid { display: grid; grid-template-columns: minmax(0, 1.6fr) repeat(3, minmax(0, 1fr)); gap: var(--sp-32); }
+.ld-brand--sm .logo { width: 24px; height: 24px; }
+.ld-foot__text { max-width: 34ch; margin-top: var(--sp-12); color: var(--fg-subtle); font-size: var(--fs-12); line-height: 1.6; }
+.ld-foot__col { display: flex; flex-direction: column; gap: var(--sp-9); }
+.ld-foot__h { color: var(--fg); font-size: var(--fs-11); font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; }
+.ld-foot__col a { color: var(--fg-muted); font-size: var(--fs-13); border-radius: var(--r-sm); transition: color var(--t-fast) var(--ease); }
+.ld-foot__col a:hover { color: var(--fg); }
+.ld-foot__col a:focus-visible { outline: none; box-shadow: var(--ring); }
+
+/* ─────────────────────────────── Motion ────────────────────────────── */
+
+/* Hero entrance: one keyframe, staggered by class. The whole sequence completes
+   in under 400ms so a reader arriving mid-animation is not waiting on
+   choreography to read the headline. `backwards` so each element is hidden
+   during its own delay instead of flashing at full opacity first. */
+@keyframes ld-rise {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: none; }
+}
+.rise { animation: ld-rise var(--t-slow) var(--ease) backwards; }
+.rise--1 { animation-delay: 0ms; }
+.rise--2 { animation-delay: 40ms; }
+.rise--3 { animation-delay: 80ms; }
+.rise--4 { animation-delay: 120ms; }
+.rise--5 { animation-delay: 160ms; }
+.rise--6 { animation-delay: 210ms; }
+
+/* Scroll reveal.
+   The hidden state is scoped behind `.has-reveal` on <html>, which landing.js
+   adds only when it is both running and about to observe. Without that guard, a
+   script failure or a blocked file would leave the whole page invisible — a
+   reveal is an enhancement and must not be able to hide content it cannot then
+   show. The same guard skips the mechanism under prefers-reduced-motion, so
+   those readers get static content rather than content that animates instantly.
+
+   Two variants, because one motion applied to every section is the same problem
+   as one card shape applied to every section — seventeen groups all sliding up
+   by 14px is a page that animates rather than a page that explains:
+
+     default        translate + fade. Now used only where a block genuinely
+                    arrives from somewhere: the framed panels and the plan cards.
+     .reveal--rule  the rule draws itself along its own axis and the text only
+                    fades. Used by every ruled section (problem, capabilities,
+                    security), so the motion is the section's device performing
+                    itself rather than a generic entrance bolted on top. */
+.has-reveal .reveal {
+  opacity: 0;
+  transform: translateY(14px);
+  transition: opacity var(--t-slow) var(--ease), transform var(--t-slow) var(--ease);
+}
+.has-reveal .reveal.is-in { opacity: 1; transform: none; }
+/* Children stagger off an index landing.js writes. 45ms is short enough that a
+   six-cell grid finishes inside 300ms; slower reads as the page loading rather
+   than as the content arriving. */
+.has-reveal .reveal > * { transition-delay: calc(var(--i, 0) * 45ms); }
+
+/* Ruled sections: the container never moves and the type never scales. Each
+   entry's rule draws along its own axis and the text simply resolves. The motion
+   is the section's own device performing itself, which is the difference between
+   an animation that explains and an entrance bolted on top.
+
+   Custom properties inherit into pseudo-elements, so `--i` set on the entry by
+   landing.js also staggers the rule. */
+.has-reveal .reveal--rule { opacity: 1; transform: none; }
+.has-reveal .reveal--rule > * {
+  opacity: 0;
+  transform: none;
+  transition: opacity var(--t-slow) var(--ease);
+}
+.has-reveal .reveal--rule.is-in > * { opacity: 1; }
+.has-reveal .reveal--rule > *::before {
+  transform: scaleX(0);
+  transition: transform 420ms var(--ease);
+  transition-delay: calc(var(--i, 0) * 45ms);
+}
+.has-reveal .reveal--rule.is-in > *::before { transform: none; }
+
+/* The security list is one rule for the whole block, drawn vertically, rather
+   than one rule per entry. */
+.has-reveal .reveal--rule.creed::before { transform: scaleY(0); transition: transform 560ms var(--ease); }
+.has-reveal .reveal--rule.creed.is-in::before { transform: none; }
+/* Its entries carry a horizontal tick, not a full-width rule, so they keep the
+   horizontal draw. */
+.has-reveal .reveal--rule.creed > *::before { transform-origin: left; }
+
+/* The architecture spine draws downward as the section arrives, in the direction
+   a request travels through it. The layers themselves only fade — the line is
+   the thing that moves, because the line is the claim. */
+.has-reveal .reveal--spine { opacity: 1; transform: none; }
+.has-reveal .reveal--spine::before { transform: scaleY(0); transition: transform 600ms var(--ease); }
+.has-reveal .reveal--spine.is-in::before { transform: scaleY(1); }
+.has-reveal .reveal--spine > * { opacity: 0; transition: opacity var(--t-slow) var(--ease); }
+.has-reveal .reveal--spine.is-in > * { opacity: 1; }
+
+/* ────────────────────────────── Responsive ─────────────────────────── */
+
+/* 1024: tablet. The two-column splits collapse — a sticky heading column has
+   nothing to stay beside once the content is full width — and the demo stacks so
+   the trace is read before the result rather than next to it. */
+@media (max-width: 1024px) {
+  .sec-split, .faq-split { grid-template-columns: minmax(0, 1fr); }
+  .sec-split .sec, .faq-split .sec { position: static; margin-bottom: var(--sp-24); }
+  .demo__body { grid-template-columns: minmax(0, 1fr); }
+  .trace { border-right: 0; border-bottom: 1px solid var(--border); }
+  .arch__layer { grid-template-columns: minmax(0, 1fr); gap: var(--sp-16); }
+  .faults { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .defs { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .def--wide { grid-column: span 2; }
+  .def--full { grid-column: span 4; }
+  .metrics__grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .metrics__split { display: none; }
+  .ld-foot__grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+/* 900: the figure's sidebar is dropped rather than squeezed — below this it is
+   narrower than the workspace chip inside it, and the figure is decorative, so
+   losing a column costs nothing. */
+@media (max-width: 900px) {
+  .stage__body { grid-template-columns: minmax(0, 1fr); }
+  .stage__side { display: none; }
+}
+
+/* 640: phone. The section links go — they duplicate a scroll the reader can
+   already perform — and page gutters tighten to match the app's. */
+@media (max-width: 640px) {
+  .ld-shell, .ld-nav__inner { padding-left: var(--sp-16); padding-right: var(--sp-16); }
+  .ld-nav__links { display: none; }
+  .hero__cta, .close__cta { width: 100%; flex-direction: column; align-items: stretch; }
+  .hero__cta .btn, .close__cta .btn { width: 100%; }
+  .stage__meters { grid-template-columns: minmax(0, 1fr); }
+  .stage__tr { grid-template-columns: minmax(0, 1fr) 72px; }
+  /* Body rows hide the owner at phone width, so the matching header has to
+     leave too. Without this the three <b> cells flowed into a two-column grid
+     and "STATUS" wrapped onto a second header row above the first project. */
+  .stage__tr em,
+  .stage__tr--head b:nth-child(2) { display: none; }
+  .faults, .defs { grid-template-columns: minmax(0, 1fr); }
+  .def, .def--wide, .def--full { grid-column: span 1; }
+  .creed__item { grid-template-columns: minmax(0, 1fr); gap: var(--sp-8); }
+  .demo__head { flex-direction: column; align-items: stretch; }
+  .demo__run { justify-content: center; }
+  .qa__a { padding-right: var(--sp-4); }
+  .ld-foot__grid { grid-template-columns: minmax(0, 1fr); gap: var(--sp-24); }
+}
+
+/* ──────────────────────────── Forced colors ────────────────────────── */
+
+/* Windows High Contrast Mode drops box-shadow, which is where several elements
+   get their only edge and where every focus ring lives. Restore both as real
+   borders and outlines; same reasoning as app.css's forced-colors block. The
+   decorative gradients go entirely — in a two-colour palette they render as flat
+   blocks over content. */
+@media (forced-colors: active) {
+  .stage, .stage__org, .meter-mini, .stage__table, .plan, .guard, .node,
+  .demo, .code-card, .def__facts li, .tag { border: 1px solid CanvasText; }
+  .ld-brand:focus-visible,
+  .ld-nav__links a:focus-visible,
+  .ld-foot__col a:focus-visible,
+  .tab:focus-visible,
+  .qa__q:focus-visible { outline: 2px solid Highlight; outline-offset: 2px; }
+  .hero::before, .hero::after { display: none; }
+  .stage__mark { forced-color-adjust: none; background: Highlight; }
+  .trace__step[data-state="active"] .trace__dot { forced-color-adjust: none; background: Highlight; }
+}
