@@ -77,57 +77,175 @@ func TestRBAC_GuestCannotManageRoles(t *testing.T) {
 	tokens, _ := resp.Data["tokens"].(map[string]interface{})
 	ownerToken, _ := tokens["access_token"].(string)
 
-	// Find the seeded Guest role's ID.
-	w = doJSON(router, http.MethodGet, "/api/v1/roles", nil, ownerToken)
-	var rolesResp struct {
-		Data []map[string]interface{} `json:"data"`
-	}
-	json.Unmarshal(w.Body.Bytes(), &rolesResp)
-	var guestRoleID string
-	for _, r := range rolesResp.Data {
-		if r["slug"] == "guest" {
-			guestRoleID, _ = r["id"].(string)
-		}
-	}
-	if guestRoleID == "" {
-		t.Fatalf("could not find seeded guest role: %s", w.Body.String())
-	}
+	// Create a real Guest through the invitation flow. The previous version of
+	// this test downgraded the sole Owner, which is now correctly forbidden by
+	// the last-Owner invariant.
+	guestToken, _ := inviteAndLogin(t, router, ownerToken, slug, "guest", "Guest User")
 
-	// Register a second user in the same tenant is not directly supported by
-	// this API surface yet (invitations module is a later phase), so instead
-	// we downgrade the owner's OWN role set to Guest-only by revoking Owner
-	// and assigning Guest, then verify the now-Guest-only user is rejected
-	// by the role-management endpoints.
-	var meResp envelope
-	w = doJSON(router, http.MethodGet, "/api/v1/me", nil, ownerToken)
-	json.Unmarshal(w.Body.Bytes(), &meResp)
-	userID, _ := meResp.Data["id"].(string)
-
-	var ownerRoleID string
-	for _, r := range rolesResp.Data {
-		if r["slug"] == "owner" {
-			ownerRoleID, _ = r["id"].(string)
-		}
-	}
-
-	w = doJSON(router, http.MethodPost, "/api/v1/roles/assign", map[string]string{"user_id": userID, "role_id": guestRoleID}, ownerToken)
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200 assigning guest role, got %d: %s", w.Code, w.Body.String())
-	}
-	w = doJSON(router, http.MethodPost, "/api/v1/roles/revoke", map[string]string{"user_id": userID, "role_id": ownerRoleID}, ownerToken)
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200 revoking owner role, got %d: %s", w.Code, w.Body.String())
-	}
-
-	// The access token's embedded role claim is stale (still says "owner"),
-	// but permission checks re-verify against the database on every request
-	// rather than trusting the JWT's role claim (see identity.Claims'
-	// documented rationale) -- so this request must now be rejected despite
-	// presenting a token that still LOOKS like an owner token.
+	// A Guest lacks role:manage, so the route-level permission gate rejects the
+	// mutation before the actor-aware service checks are reached.
 	w = doJSON(router, http.MethodPost, "/api/v1/roles", map[string]interface{}{
 		"name": "Should Not Be Created", "permission_codes": []string{},
-	}, ownerToken)
+	}, guestToken)
 	if w.Code != http.StatusForbidden {
-		t.Fatalf("expected 403 creating a role after downgrade to guest-only, got %d: %s", w.Code, w.Body.String())
+		t.Fatalf("expected 403 creating a role as guest, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+// TestRBAC_RolePermissionEditingIsLosslessAndTenantScoped covers the editor's
+// complete read/replace contract. In particular, every rejected write is
+// followed by another GET so the test proves the grants were not partially
+// deleted before validation failed.
+func TestRBAC_RolePermissionEditingIsLosslessAndTenantScoped(t *testing.T) {
+	router, database, _ := setupTestRouter(t)
+	slugA := uniqueSlug("rbacpermsa")
+	slugB := uniqueSlug("rbacpermsb")
+	defer cleanupTenant(t, database, slugA)
+	defer cleanupTenant(t, database, slugB)
+
+	tokenA, _ := registerOwner(t, router, slugA)
+	tokenB, _ := registerOwner(t, router, slugB)
+
+	findRoleID := func(token, slug string) string {
+		t.Helper()
+		w := doJSON(router, http.MethodGet, "/api/v1/roles", nil, token)
+		if w.Code != http.StatusOK {
+			t.Fatalf("list roles failed: %d %s", w.Code, w.Body.String())
+		}
+		for _, role := range dataArray(t, w) {
+			if role["slug"] == slug {
+				id, _ := role["id"].(string)
+				return id
+			}
+		}
+		t.Fatalf("role %q not found", slug)
+		return ""
+	}
+
+	type grants struct {
+		RoleID          string   `json:"role_id"`
+		PermissionCodes []string `json:"permission_codes"`
+		Revision        string   `json:"revision"`
+	}
+	getGrants := func(token, roleID string) grants {
+		t.Helper()
+		w := doJSON(router, http.MethodGet, "/api/v1/roles/"+roleID+"/permissions", nil, token)
+		if w.Code != http.StatusOK {
+			t.Fatalf("get role permissions failed: %d %s", w.Code, w.Body.String())
+		}
+		var response struct {
+			Data grants `json:"data"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+			t.Fatalf("decode role permissions: %v", err)
+		}
+		return response.Data
+	}
+	equalCodes := func(got, want []string) bool {
+		if len(got) != len(want) {
+			return false
+		}
+		counts := make(map[string]int, len(want))
+		for _, code := range want {
+			counts[code]++
+		}
+		for _, code := range got {
+			counts[code]--
+		}
+		for _, count := range counts {
+			if count != 0 {
+				return false
+			}
+		}
+		return true
+	}
+
+	guestA := findRoleID(tokenA, "guest")
+	initial := getGrants(tokenA, guestA)
+	seeded := []string{"org:view", "member:view", "team:view", "project:view"}
+	if initial.RoleID != guestA || initial.Revision == "" || !equalCodes(initial.PermissionCodes, seeded) {
+		t.Fatalf("unexpected seeded grants: %+v", initial)
+	}
+
+	// Saving the loaded set, including a duplicate code, must preserve the
+	// exact grants and create only one join row per permission.
+	withDuplicate := append(append([]string(nil), initial.PermissionCodes...), initial.PermissionCodes[0])
+	w := doJSON(router, http.MethodPut, "/api/v1/roles/"+guestA+"/permissions", map[string]interface{}{
+		"permission_codes": withDuplicate,
+		"revision":         initial.Revision,
+	}, tokenA)
+	if w.Code != http.StatusOK {
+		t.Fatalf("unchanged save failed: %d %s", w.Code, w.Body.String())
+	}
+	unchanged := getGrants(tokenA, guestA)
+	if !equalCodes(unchanged.PermissionCodes, seeded) {
+		t.Fatalf("unchanged save altered grants: %+v", unchanged)
+	}
+	if unchanged.Revision == initial.Revision {
+		t.Fatal("successful replacement did not advance the role revision")
+	}
+
+	// A missing field differs from an explicit empty list and must be rejected.
+	w = doJSON(router, http.MethodPut, "/api/v1/roles/"+guestA+"/permissions", map[string]interface{}{
+		"revision": unchanged.Revision,
+	}, tokenA)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("missing permission_codes returned %d, want 400: %s", w.Code, w.Body.String())
+	}
+	if afterMissing := getGrants(tokenA, guestA); !equalCodes(afterMissing.PermissionCodes, seeded) || afterMissing.Revision != unchanged.Revision {
+		t.Fatalf("missing field changed grants: %+v", afterMissing)
+	}
+
+	w = doJSON(router, http.MethodPut, "/api/v1/roles/"+guestA+"/permissions", map[string]interface{}{
+		"permission_codes": []string{"project:view", "not:a-permission"},
+		"revision":         unchanged.Revision,
+	}, tokenA)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("unknown permission returned %d, want 400: %s", w.Code, w.Body.String())
+	}
+	if afterUnknown := getGrants(tokenA, guestA); !equalCodes(afterUnknown.PermissionCodes, seeded) || afterUnknown.Revision != unchanged.Revision {
+		t.Fatalf("unknown permission changed grants: %+v", afterUnknown)
+	}
+
+	// An explicitly present empty array is intentional remove-all.
+	w = doJSON(router, http.MethodPut, "/api/v1/roles/"+guestA+"/permissions", map[string]interface{}{
+		"permission_codes": []string{},
+		"revision":         unchanged.Revision,
+	}, tokenA)
+	if w.Code != http.StatusOK {
+		t.Fatalf("explicit empty replacement failed: %d %s", w.Code, w.Body.String())
+	}
+	empty := getGrants(tokenA, guestA)
+	if len(empty.PermissionCodes) != 0 || empty.Revision == unchanged.Revision {
+		t.Fatalf("remove-all did not persist or advance revision: %+v", empty)
+	}
+
+	// The pre-remove revision is stale and cannot restore data over the newer edit.
+	w = doJSON(router, http.MethodPut, "/api/v1/roles/"+guestA+"/permissions", map[string]interface{}{
+		"permission_codes": []string{"project:view"},
+		"revision":         unchanged.Revision,
+	}, tokenA)
+	if w.Code != http.StatusConflict {
+		t.Fatalf("stale revision returned %d, want 409: %s", w.Code, w.Body.String())
+	}
+	if afterStale := getGrants(tokenA, guestA); len(afterStale.PermissionCodes) != 0 || afterStale.Revision != empty.Revision {
+		t.Fatalf("stale write changed grants: %+v", afterStale)
+	}
+
+	// A valid owner credential from tenant A cannot read or mutate tenant B's role.
+	guestB := findRoleID(tokenB, "guest")
+	beforeB := getGrants(tokenB, guestB)
+	w = doJSON(router, http.MethodGet, "/api/v1/roles/"+guestB+"/permissions", nil, tokenA)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("cross-tenant GET returned %d, want 404: %s", w.Code, w.Body.String())
+	}
+	w = doJSON(router, http.MethodPut, "/api/v1/roles/"+guestB+"/permissions", map[string]interface{}{
+		"permission_codes": []string{},
+	}, tokenA)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("cross-tenant PUT returned %d, want 404: %s", w.Code, w.Body.String())
+	}
+	if afterB := getGrants(tokenB, guestB); !equalCodes(afterB.PermissionCodes, beforeB.PermissionCodes) || afterB.Revision != beforeB.Revision {
+		t.Fatalf("cross-tenant write changed tenant B grants: %+v", afterB)
 	}
 }
