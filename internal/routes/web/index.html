@@ -3,11 +3,35 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="color-scheme" content="light dark" />
-    <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
-    <meta name="theme-color" content="#0a0e1a" media="(prefers-color-scheme: dark)" />
+    <meta name="color-scheme" content="dark light" />
+    <!-- Dark is the default scheme (see theme.js), so the browser chrome follows
+         it unconditionally rather than tracking prefers-color-scheme. -->
+    <meta name="theme-color" content="#000000" />
     <meta name="description" content="Multi-tenant workspace administration: projects, teams, members, roles, billing, and audit." />
     <title>Tenancy</title>
+
+    <link rel="icon" href="/assets/brand/favicon.svg" type="image/svg+xml" />
+    <link rel="alternate icon" href="/favicon.ico" sizes="any" />
+    <link rel="apple-touch-icon" href="/assets/brand/apple-touch-icon.png" sizes="180x180" />
+    <link rel="mask-icon" href="/assets/brand/safari-pinned-tab.svg" color="#5e6ad2" />
+    <link rel="manifest" href="/site.webmanifest" />
+    <meta name="application-name" content="Tenancy" />
+    <meta name="apple-mobile-web-app-title" content="Tenancy" />
+    <meta name="msapplication-TileColor" content="#000000" />
+    <meta name="msapplication-TileImage" content="/assets/brand/icon-192.png" />
+    <meta name="robots" content="noindex, nofollow" />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Tenancy" />
+    <meta property="og:title" content="Tenancy Workspace" />
+    <meta property="og:description" content="Projects, teams, members, roles, billing, API keys, and audit in one tenant-safe workspace." />
+    <meta property="og:image" content="/assets/brand/social-card.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="Tenancy — multi-tenant isolation your database enforces" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Tenancy Workspace" />
+    <meta name="twitter:description" content="Projects, teams, members, roles, billing, API keys, and audit in one tenant-safe workspace." />
+    <meta name="twitter:image" content="/assets/brand/social-card.png" />
 
     <!-- Synchronous: sets the theme class before first paint. See theme.js. -->
     <script src="/assets/theme.js"></script>
@@ -83,7 +107,7 @@
       <aside class="auth__aside">
         <div class="auth__aside-inner">
           <div class="auth__brand">
-            <span class="logo" aria-hidden="true"><span class="logo__mark"></span></span>
+            <img class="logo" src="/assets/brand/logo-mark.svg" width="30" height="30" alt="" />
             <span class="logo__word">Tenancy</span>
           </div>
 
@@ -109,7 +133,7 @@
 
         <div class="auth__panel">
           <div class="auth__brand">
-            <span class="logo" aria-hidden="true"><span class="logo__mark"></span></span>
+            <img class="logo" src="/assets/brand/logo-mark.svg" width="30" height="30" alt="" />
             <span class="logo__word">Tenancy</span>
           </div>
 
@@ -118,7 +142,7 @@
 
           <div class="alert" id="auth-alert" role="alert" hidden></div>
 
-          <form id="form-login" class="form" novalidate>
+          <form id="form-login" class="form">
             <div class="field">
               <label class="field__label" for="login-email">Email</label>
               <input class="input" id="login-email" type="email" autocomplete="email" placeholder="you@company.com" required />
@@ -138,7 +162,7 @@
             <button class="btn btn--primary btn--block" type="submit">Sign in</button>
           </form>
 
-          <form id="form-register" class="form" novalidate hidden>
+          <form id="form-register" class="form" hidden>
             <div class="field">
               <label class="field__label" for="reg-org">Workspace name</label>
               <input class="input" id="reg-org" autocomplete="organization" placeholder="Acme Inc" required minlength="2" />
@@ -168,7 +192,7 @@
             <button class="btn btn--primary btn--block" type="submit">Create workspace</button>
           </form>
 
-          <form id="form-invite" class="form" novalidate hidden>
+          <form id="form-invite" class="form" hidden>
             <div class="callout" id="invite-detail"></div>
             <div class="field">
               <label class="field__label" for="inv-name">Your name</label>
@@ -208,10 +232,13 @@
         <button class="omni" type="button" id="omni">
           <svg class="icon icon--sm"><use href="#i-search" /></svg>
           <span>Search or jump to…</span>
-          <span class="kbds"><kbd class="kbd">⌘</kbd><kbd class="kbd">K</kbd></span>
+          <span class="kbds"><kbd class="kbd" id="palette-modifier">Ctrl/⌘</kbd><kbd class="kbd">K</kbd></span>
         </button>
 
         <div class="topbar__actions">
+          <button class="icon-btn topbar__palette" type="button" id="palette-mobile" aria-label="Open command palette">
+            <svg class="icon icon--sm" aria-hidden="true"><use href="#i-search" /></svg>
+          </button>
           <button class="icon-btn" type="button" id="theme-btn" aria-label="Toggle theme">
             <svg class="icon icon--sm icon--sun"><use href="#i-sun" /></svg>
             <svg class="icon icon--sm icon--moon"><use href="#i-moon" /></svg>
@@ -229,7 +256,7 @@
         <!-- Visible only when the sidebar is a drawer; the topbar carries the
              context on desktop, so repeating the wordmark there is noise. -->
         <div class="sidebar__brand">
-          <span class="logo" aria-hidden="true"><span class="logo__mark"></span></span>
+          <img class="logo" src="/assets/brand/logo-mark.svg" width="30" height="30" alt="" />
           <span class="logo__word">Tenancy</span>
         </div>
 
