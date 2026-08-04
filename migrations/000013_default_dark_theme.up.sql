@@ -1,0 +1,12 @@
+-- Dark is the product's primary experience, not a mirror of the operating
+-- system setting: the dashboard's surface system is designed on true black, so
+-- defaulting to 'system' handed every light-mode desktop the secondary theme.
+--
+-- This only changes the default for rows inserted from here on. Existing rows
+-- keep whatever the user saved, including an explicit 'system', which is still
+-- a permitted value and still selectable in Settings → Appearance.
+--
+-- The application resolves the same default in two other places, and all three
+-- must agree: preferences.Defaults() for a user with no row yet, and
+-- web/assets/theme.js, which has to pick a scheme before first paint.
+ALTER TABLE user_preferences ALTER COLUMN theme SET DEFAULT 'dark';
