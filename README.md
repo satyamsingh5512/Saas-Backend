@@ -458,16 +458,18 @@ Render to generate `JWT_SECRET`. Neither secret is committed. `DATABASE_URL`
 takes precedence over the individual `DB_*` settings. The health check is
 `GET /health`.
 
-Both services run on Render's paid tiers, deliberately. The free tier is
-unsuitable for a real deployment: a free Postgres instance expires 30 days after
-creation and is then deleted, and a free web service sleeps after 15 minutes of
-inactivity and cold-starts on the next request.
+The checked-in Blueprint uses Render's free web and Postgres plans so a preview
+can be provisioned without first enabling paid billing. Treat it as an
+evaluation deployment only: the web service sleeps after periods of inactivity
+and cold-starts on the next request, while the free Postgres instance expires 30
+days after creation and is then deleted. Before storing production data, change
+the web plan to `starter` and the database plan to `basic-256mb` (or larger).
 
-The blueprint also sets production-relevant runtime configuration: pool limits
-(`DB_MAX_OPEN_CONNS=20`, kept under the instance's connection ceiling), token
-lifetimes, and `SHUTDOWN_TIMEOUT=20s` so in-flight requests drain on deploy. The
-database's `ipAllowList` is empty, which keeps it off the public internet and
-reachable only over Render's private network.
+The Blueprint pins PostgreSQL 16 and sets production-relevant runtime
+configuration: pool limits (`DB_MAX_OPEN_CONNS=20`, kept under the instance's
+connection ceiling), token lifetimes, and `SHUTDOWN_TIMEOUT=20s` so in-flight
+requests drain on deploy. The database's `ipAllowList` is empty, which keeps it
+off the public internet and reachable only over Render's private network.
 
 Deploying:
 
