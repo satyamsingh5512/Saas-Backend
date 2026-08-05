@@ -32,6 +32,16 @@ type EventPublisher interface {
 	Publish(ctx context.Context, topic string, key string, payload any) error
 }
 
+// Mailer is the minimal surface identity needs to deliver the tokens these
+// flows mint. Both methods are fire-and-forget by contract: delivery happens on
+// a detached goroutine, so a provider outage cannot fail a reset request, and --
+// more importantly -- cannot make a request for a real address take measurably
+// longer than one for an unknown address. A nil Mailer disables sending.
+type Mailer interface {
+	SendPasswordReset(ctx context.Context, to, token string)
+	SendEmailVerification(ctx context.Context, to, token string)
+}
+
 // Config holds identity-module tunables sourced from the app's central
 // config (internal/config), kept as a small struct so Service's
 // constructor signature doesn't balloon as more settings are added.
@@ -54,13 +64,14 @@ type Service struct {
 	tenantRepo *tenancy.Repository
 	roles      RoleAssigner
 	events     EventPublisher
+	mail       Mailer
 	cfg        Config
 	oauthCfg   OAuthConfig
 	db         *gorm.DB
 }
 
-func NewService(repo *Repository, tenantRepo *tenancy.Repository, roles RoleAssigner, events EventPublisher, db *gorm.DB, cfg Config, oauthCfg OAuthConfig) *Service {
-	return &Service{repo: repo, tenantRepo: tenantRepo, roles: roles, events: events, db: db, cfg: cfg, oauthCfg: oauthCfg}
+func NewService(repo *Repository, tenantRepo *tenancy.Repository, roles RoleAssigner, events EventPublisher, mail Mailer, db *gorm.DB, cfg Config, oauthCfg OAuthConfig) *Service {
+	return &Service{repo: repo, tenantRepo: tenantRepo, roles: roles, events: events, mail: mail, db: db, cfg: cfg, oauthCfg: oauthCfg}
 }
 
 // ValidateCredentialState is called after JWT signature validation on every
@@ -316,11 +327,17 @@ func (s *Service) RequestPasswordReset(ctx context.Context, req ForgotPasswordRe
 		return apperror.Wrap(apperror.CodeInternal, "failed to store reset token", err)
 	}
 
-	// TODO(notification phase): dispatch the plaintext reset token via the
-	// email notification channel rather than only logging it. Deferred
-	// until internal/notification exists (Phase 11). Publishing a domain
-	// event now means the notification consumer can pick this up
-	// immediately once it's implemented, without a code change here.
+	// Delivery is dispatched, not awaited. This function must behave the same
+	// for a real and an unknown address -- see its doc comment -- and awaiting a
+	// provider here would reintroduce exactly the account-existence signal the
+	// early returns above are written to avoid.
+	if s.mail != nil {
+		s.mail.SendPasswordReset(ctx, user.Email, plain)
+	}
+
+	// The event carries the plaintext token for any future consumer (an
+	// alternative transport, or an audit-free delivery pipeline). It is
+	// deliberately absent from the audit log and application logs.
 	if s.events != nil {
 		_ = s.events.Publish(ctx, "auth.password_reset_requested", user.ID.String(), map[string]any{
 			"user_id": user.ID, "tenant_id": tenant.ID, "reset_token": plain,
@@ -379,6 +396,10 @@ func (s *Service) RequestEmailVerification(ctx context.Context, tenantID, userID
 	}
 	if err := s.repo.CreateVerificationToken(scopedCtx, tenantID, vt); err != nil {
 		return apperror.Wrap(apperror.CodeInternal, "failed to store verification token", err)
+	}
+
+	if s.mail != nil {
+		s.mail.SendEmailVerification(ctx, user.Email, plain)
 	}
 
 	if s.events != nil {

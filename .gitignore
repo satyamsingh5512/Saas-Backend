@@ -4,3 +4,10 @@
 /tmp/
 *.log
 .DS_Store
+
+# Agent working notes: steering rules and skills. Local guidance for how to work
+# in this repo, not part of the shipped project. README.md is the documentation
+# that stays tracked.
+.kiro/
+AGENTS.md
+

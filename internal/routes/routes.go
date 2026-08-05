@@ -14,6 +14,7 @@ import (
 	"github.com/satym-in/tenant-saas-backend/internal/eventbus"
 	"github.com/satym-in/tenant-saas-backend/internal/identity"
 	"github.com/satym-in/tenant-saas-backend/internal/invitations"
+	"github.com/satym-in/tenant-saas-backend/internal/mailer"
 	"github.com/satym-in/tenant-saas-backend/internal/middleware"
 	"github.com/satym-in/tenant-saas-backend/internal/notifications"
 	"github.com/satym-in/tenant-saas-backend/internal/platform"
@@ -86,8 +87,24 @@ func Setup(db *gorm.DB, cfg *config.Config) *gin.Engine {
 	projectService := projects.NewService(projects.NewRepository(db), auditService, billingService, notificationService)
 	projectHandler := projects.NewHandler(projectService)
 
+	// Mail transport is chosen once, here: a configured Resend key selects the
+	// HTTP sender, an unset one selects the no-op that logs an undeliverable
+	// message. No flow branches on it, so an environment without a mail provider
+	// behaves identically except that nothing is delivered.
+	var mailSender mailer.Sender = mailer.Noop{Logger: appLogger}
+	if cfg.ResendAPIKey != "" && cfg.MailFrom != "" && cfg.AppBaseURL != "" {
+		mailSender = mailer.NewResend(cfg.ResendAPIKey, cfg.MailFrom)
+	} else if cfg.ResendAPIKey != "" {
+		// Half-configured: a key with no sender or no public base URL would
+		// produce provider rejections or dead links on every send. Say so once at
+		// startup rather than once per message.
+		appLogger.Error("email disabled: RESEND_API_KEY is set but MAIL_FROM or APP_BASE_URL is missing")
+	}
+	mailNotifier := mailer.NewNotifier(mailSender, cfg.AppBaseURL, appLogger)
+
 	invitationService := invitations.NewService(
 		invitations.NewRepository(db), auditService, billingService, eventbus.NoopPublisher{}, authzService,
+		mailNotifier, tenantRepo,
 		invitations.Config{TTL: config.Duration(cfg.InvitationTTL, 0)})
 	invitationHandler := invitations.NewHandler(invitationService)
 
@@ -100,16 +117,13 @@ func Setup(db *gorm.DB, cfg *config.Config) *gin.Engine {
 	preferenceHandler := preferences.NewHandler(preferenceService)
 
 	identityRepo := identity.NewRepository(db)
-	identityService := identity.NewService(identityRepo, tenantRepo, authzService, eventbus.NoopPublisher{}, db, identity.Config{
+	identityService := identity.NewService(identityRepo, tenantRepo, authzService, eventbus.NoopPublisher{}, mailNotifier, db, identity.Config{
 		JWTSecret:            cfg.JWTSecret,
 		AccessTokenTTL:       config.Duration(cfg.AccessTokenTTL, 0),
 		RefreshTokenTTL:      config.Duration(cfg.RefreshTokenTTL, 0),
 		PasswordResetTTL:     config.Duration(cfg.PasswordResetTTL, 0),
 		EmailVerificationTTL: config.Duration(cfg.EmailVerificationTTL, 0),
 	}, identity.OAuthConfig{
-		GoogleClientID:     cfg.GoogleOAuthClientID,
-		GoogleClientSecret: cfg.GoogleOAuthClientSecret,
-		GoogleRedirectURL:  cfg.GoogleOAuthRedirectURL,
 		GitHubClientID:     cfg.GitHubOAuthClientID,
 		GitHubClientSecret: cfg.GitHubOAuthClientSecret,
 		GitHubRedirectURL:  cfg.GitHubOAuthRedirectURL,

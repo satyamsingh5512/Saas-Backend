@@ -210,7 +210,7 @@ func parseIntQuery(c *gin.Context, key string, def int) int {
 // browser to the provider's consent screen. tenant_slug is required as a
 // query param since this route runs before authentication and the
 // tenancy.Resolver middleware only resolves a tenant from subdomain/header,
-// neither of which a plain "click to sign in with Google" link naturally
+// neither of which a plain "sign in with GitHub" link naturally
 // carries.
 func (h *Handler) OAuthAuthorize(c *gin.Context) {
 	provider := c.Param("provider")

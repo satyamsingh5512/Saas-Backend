@@ -15,14 +15,14 @@ every B2B SaaS needs before it can build its actual product.
 | Capability | What it covers |
 |---|---|
 | Tenant onboarding | Create an organization plus its first owner atomically |
-| Authentication | Password login, refresh-token rotation with theft detection, password reset, email verification, Google/GitHub OAuth |
+| Authentication | Password login, refresh-token rotation with theft detection, password reset, email verification, GitHub OAuth |
 | Authorization | Database-driven RBAC: 5 seeded roles, 21 permissions, editable per tenant |
 | Tenant isolation | PostgreSQL Row-Level Security on every tenant-scoped table |
 | Teams & projects | Grouping, membership, archival, soft delete |
 | Invitations | Single-use hashed invite tokens redeemable without a prior account |
 | API keys | Scoped machine credentials, hashed at rest, revocable |
 | Billing | Plan catalog, per-tenant subscription, enforced seat/project quotas |
-| Notifications | Per-user in-app feed with unread tracking |
+| Notifications | Per-user in-app feed with unread tracking, plus transactional email via Resend |
 | Audit & activity | Append-only compliance log plus a product-facing timeline |
 | Self-service | Profile, display preferences, password rotation |
 | Workspace UI | A dashboard for all of the above, embedded in the binary |
@@ -152,6 +152,7 @@ internal/db/                     Connection pool, startup ping, migration runner
 internal/middleware/             RequestID, slog logger, recovery, security headers, CORS, rate limit
 internal/platform/               Health / readiness / liveness endpoints
 internal/eventbus/               Domain event publisher interface (no-op until Kafka)
+internal/mailer/                 Transactional email: Resend transport, no-op fallback
 
 internal/tenancy/                Tenant entity, resolver, credential-based tenant override
 internal/identity/               Users, login, refresh rotation, password reset, OAuth
@@ -301,6 +302,32 @@ origin as the API, so no CORS configuration is needed.
 The two-credential split matters: migrations need privileges (`CREATE POLICY`,
 `CREATE ROLE`) that the runtime role deliberately lacks. Pointing `DB_USER` at a
 superuser would make tenant isolation tests pass for the wrong reason.
+
+### Email
+
+Three flows send mail: member invitation, password reset, and email
+verification. All three go through `internal/mailer`.
+
+```bash
+RESEND_API_KEY=re_...                  # unset selects the no-op transport
+MAIL_FROM='Acme <noreply@acme.com>'    # must be a Resend-verified domain
+APP_BASE_URL=http://localhost:8080     # origin used to build links
+```
+
+With `RESEND_API_KEY` unset — the default — the no-op transport logs each
+message at `WARN` with its recipient and flow, never its body, and nothing else
+changes: tokens are still minted, stored hashed, and returned by the API, so the
+dashboard's invite link keeps working without a mail provider. Setting the key
+without `MAIL_FROM` or `APP_BASE_URL` is reported once at startup and leaves
+sending disabled, because a key alone would produce either provider rejections or
+links that resolve nowhere.
+
+Delivery is dispatched on a detached goroutine rather than awaited. That is a
+security property, not an optimization: `RequestPasswordReset` returns the same
+response whether or not the address exists, and waiting for a provider would make
+the real case measurably slower — an account-existence oracle readable from
+outside. The cost is that a delivery failure is logged rather than returned, which
+is why no flow treats mail as a precondition.
 
 ## 10) Development Commands
 
@@ -503,11 +530,8 @@ one table will silently leak across tenants on exactly this kind of deployment.
 Interfaces exist and degrade to no-ops, so these can be added without touching
 call sites:
 
-- **Email delivery.** Invitation, password-reset, and verification tokens are
-  published as domain events but not sent. Until a transport is wired up, the
-  dashboard surfaces a new invite link directly so the flow is usable.
 - **Kafka event publishing** (`internal/eventbus` is a no-op publisher).
 - **Redis caching** for permissions and tenant metadata (`nil` cache means every
   check queries Postgres, which is correct but slower).
-- **S3/MinIO file uploads.** The `file:upload` and `file:delete` permissions are
-  seeded, but no storage backend is connected.
+- **File uploads.** The `file:upload` and `file:delete` permissions are still
+  seeded, but no storage backend exists and none is configured.

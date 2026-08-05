@@ -58,6 +58,25 @@ func (r *Repository) FindByID(ctx context.Context, id uuid.UUID) (*Tenant, error
 	return &tenant, nil
 }
 
+// NameByID returns just the display name for a tenant. Used by outbound email to
+// say which organization an invitation is for. Selects the single column rather
+// than hydrating the entity, since a mail template has no use for plan, status or
+// settings.
+func (r *Repository) NameByID(ctx context.Context, id uuid.UUID) (string, error) {
+	var name string
+	err := r.db.WithContext(ctx).
+		Model(&Tenant{}).
+		Where("id = ? AND deleted_at IS NULL", id).
+		Pluck("name", &name).Error
+	if err != nil {
+		return "", fmt.Errorf("tenancy: name by id: %w", err)
+	}
+	if name == "" {
+		return "", ErrTenantNotFound
+	}
+	return name, nil
+}
+
 // Create inserts a new tenant row. The seed_default_roles trigger
 // (migrations/000008) fires automatically on insert, provisioning the five
 // system roles for this tenant.

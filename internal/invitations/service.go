@@ -30,6 +30,22 @@ type EventPublisher interface {
 	Publish(ctx context.Context, topic string, key string, payload any) error
 }
 
+// Mailer delivers the invite link. Fire-and-forget by contract: the invitation
+// row is already committed by the time it is called, and the plaintext token is
+// also returned to the caller, so the dashboard can show a link whether or not a
+// mail transport is configured. A nil Mailer disables sending.
+type Mailer interface {
+	SendInvitation(ctx context.Context, to, orgName, token string, expiresAt time.Time)
+}
+
+// TenantNamer resolves the organization name shown in the invitation email.
+// Invitations already read tenant-scoped rows; this exists so the email can say
+// which organization is inviting without the service reaching into another
+// module's repository.
+type TenantNamer interface {
+	NameByID(ctx context.Context, tenantID uuid.UUID) (string, error)
+}
+
 // RoleDelegationAuthorizer prevents invitations from bypassing the same rank
 // and permission-subset rules used by direct role assignment.
 type RoleDelegationAuthorizer interface {
@@ -50,14 +66,16 @@ type Service struct {
 	quotas SeatQuotaChecker
 	events EventPublisher
 	roles  RoleDelegationAuthorizer
+	mail   Mailer
+	names  TenantNamer
 	cfg    Config
 }
 
-func NewService(repo *Repository, recorder Recorder, quotas SeatQuotaChecker, events EventPublisher, roles RoleDelegationAuthorizer, cfg Config) *Service {
+func NewService(repo *Repository, recorder Recorder, quotas SeatQuotaChecker, events EventPublisher, roles RoleDelegationAuthorizer, mail Mailer, names TenantNamer, cfg Config) *Service {
 	if cfg.TTL <= 0 {
 		cfg.TTL = 7 * 24 * time.Hour
 	}
-	return &Service{repo: repo, audit: recorder, quotas: quotas, events: events, roles: roles, cfg: cfg}
+	return &Service{repo: repo, audit: recorder, quotas: quotas, events: events, roles: roles, mail: mail, names: names, cfg: cfg}
 }
 
 // CreateInput is the validated input for issuing an invitation. Exactly one of
@@ -137,8 +155,18 @@ func (s *Service) Create(ctx context.Context, entry audit.Entry, tenantID, actor
 		s.audit.Record(ctx, entry)
 	}
 
-	// The plaintext token is published so an email consumer can deliver it. It is
-	// deliberately not written to the audit log or application logs.
+	if s.mail != nil {
+		orgName := ""
+		if s.names != nil {
+			// A failed name lookup must not cost the invitee their email, so the
+			// error is dropped and the template falls back to generic wording.
+			orgName, _ = s.names.NameByID(ctx, tenantID)
+		}
+		s.mail.SendInvitation(ctx, email, orgName, plaintext, invite.ExpiresAt)
+	}
+
+	// The plaintext token is published so an additional consumer can deliver it.
+	// It is deliberately not written to the audit log or application logs.
 	if s.events != nil {
 		_ = s.events.Publish(ctx, "member.invited", invite.ID.String(), map[string]any{
 			"invitation_id": invite.ID,

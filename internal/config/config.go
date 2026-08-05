@@ -59,15 +59,25 @@ type Config struct {
 	// sits in an inbox.
 	InvitationTTL string
 
-	// OAuth2 provider credentials (Phase 6). Empty values disable that
-	// provider's login route rather than erroring, so the server remains
-	// usable in environments that haven't configured OAuth yet.
-	GoogleOAuthClientID     string
-	GoogleOAuthClientSecret string
-	GoogleOAuthRedirectURL  string
+	// OAuth2 provider credentials. Empty values disable that provider's login
+	// route rather than erroring, so the server remains usable in environments
+	// that haven't configured OAuth yet.
 	GitHubOAuthClientID     string
 	GitHubOAuthClientSecret string
 	GitHubOAuthRedirectURL  string
+
+	// Outbound email via Resend. An empty ResendAPIKey selects the no-op
+	// transport: token-bearing mail is logged as undeliverable rather than
+	// silently dropped, and no flow fails for want of a mail provider.
+	ResendAPIKey string
+	// MailFrom is the envelope sender, e.g. "Acme <noreply@acme.com>". It must
+	// be on a domain verified in Resend or the API rejects every send.
+	MailFrom string
+	// AppBaseURL is the public origin used to build links in outbound mail
+	// (invite, password reset, email verification). Links are unusable without
+	// it, so an empty value in production disables sending rather than mailing
+	// a relative path.
+	AppBaseURL string
 
 	// Redis (Phase 11). Empty RedisAddr disables caching gracefully.
 	RedisAddr     string
@@ -77,14 +87,6 @@ type Config struct {
 	// Kafka (Phase 10). Empty KafkaBrokers disables event publishing
 	// gracefully (falls back to a no-op publisher).
 	KafkaBrokers string
-
-	// S3/MinIO object storage (Phase 12).
-	S3Endpoint        string
-	S3Region          string
-	S3Bucket          string
-	S3AccessKeyID     string
-	S3SecretAccessKey string
-	S3UseSSL          bool
 }
 
 // Load reads configuration from a .env file (if present) and environment variables.
@@ -122,25 +124,19 @@ func Load() *Config {
 		EmailVerificationTTL: getEnv("EMAIL_VERIFICATION_TTL", "24h"),
 		InvitationTTL:        getEnv("INVITATION_TTL", "168h"), // 7 days
 
-		GoogleOAuthClientID:     getEnv("GOOGLE_OAUTH_CLIENT_ID", ""),
-		GoogleOAuthClientSecret: getEnv("GOOGLE_OAUTH_CLIENT_SECRET", ""),
-		GoogleOAuthRedirectURL:  getEnv("GOOGLE_OAUTH_REDIRECT_URL", ""),
 		GitHubOAuthClientID:     getEnv("GITHUB_OAUTH_CLIENT_ID", ""),
 		GitHubOAuthClientSecret: getEnv("GITHUB_OAUTH_CLIENT_SECRET", ""),
 		GitHubOAuthRedirectURL:  getEnv("GITHUB_OAUTH_REDIRECT_URL", ""),
+
+		ResendAPIKey: strings.TrimSpace(os.Getenv("RESEND_API_KEY")),
+		MailFrom:     strings.TrimSpace(os.Getenv("MAIL_FROM")),
+		AppBaseURL:   strings.TrimRight(strings.TrimSpace(os.Getenv("APP_BASE_URL")), "/"),
 
 		RedisAddr:     getEnv("REDIS_ADDR", ""),
 		RedisPassword: getEnv("REDIS_PASSWORD", ""),
 		RedisDB:       getEnvInt("REDIS_DB", 0),
 
 		KafkaBrokers: getEnv("KAFKA_BROKERS", ""),
-
-		S3Endpoint:        getEnv("S3_ENDPOINT", ""),
-		S3Region:          getEnv("S3_REGION", "us-east-1"),
-		S3Bucket:          getEnv("S3_BUCKET", ""),
-		S3AccessKeyID:     getEnv("S3_ACCESS_KEY_ID", ""),
-		S3SecretAccessKey: getEnv("S3_SECRET_ACCESS_KEY", ""),
-		S3UseSSL:          getEnvBool("S3_USE_SSL", true),
 	}
 }
 
@@ -171,6 +167,29 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("DB_USER, DB_PASSWORD, and DB_NAME are required when DATABASE_URL is not set in production")
 	}
 
+	return nil
+}
+
+// ValidateMail reports a half-configured mailer. Email delivery is optional --
+// an unset RESEND_API_KEY selects the no-op transport deliberately -- but a key
+// without a sender or a public base URL is a misconfiguration that would
+// otherwise surface as every invite and reset mail being rejected by Resend, or
+// delivered with a link that goes nowhere. Kept separate from Validate so it can
+// be reported as a startup warning in any environment rather than only blocking
+// production boot.
+func (c *Config) ValidateMail() error {
+	if c.ResendAPIKey == "" {
+		return nil
+	}
+	if c.MailFrom == "" {
+		return fmt.Errorf("MAIL_FROM must be set when RESEND_API_KEY is configured, on a domain verified in Resend")
+	}
+	if c.AppBaseURL == "" {
+		return fmt.Errorf("APP_BASE_URL must be set when RESEND_API_KEY is configured, so invite and reset links resolve")
+	}
+	if u, err := url.Parse(c.AppBaseURL); err != nil || u.Scheme == "" || u.Host == "" {
+		return fmt.Errorf("APP_BASE_URL must be an absolute URL, for example https://app.example.com")
+	}
 	return nil
 }
 
@@ -218,18 +237,6 @@ func getEnvInt(key string, fallback int) int {
 		return fallback
 	}
 	return n
-}
-
-func getEnvBool(key string, fallback bool) bool {
-	value, ok := os.LookupEnv(key)
-	if !ok || value == "" {
-		return fallback
-	}
-	b, err := strconv.ParseBool(value)
-	if err != nil {
-		return fallback
-	}
-	return b
 }
 
 // getEnvList parses a comma-separated environment variable into a slice,

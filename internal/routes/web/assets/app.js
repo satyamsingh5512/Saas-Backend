@@ -1532,7 +1532,7 @@
   }
 
   function showInvite(email, token, ownership) {
-    const link = `${window.location.origin}/?invite=${encodeURIComponent(token)}`;
+    const link = `${window.location.origin}/app?invite=${encodeURIComponent(token)}`;
     openModal({
       title: "Invitation created",
       desc: `Send this single-use link to ${email}. It is shown once and cannot be retrieved again.`,
@@ -1540,7 +1540,7 @@
         el("div", { class: "secret" },
           el("code", { text: link }),
           el("button", { class: "icon-btn", type: "button", title: "Copy link", "aria-label": "Copy invitation link", onclick: () => copy(link) }, icon("copy"))),
-        el("p", { class: "field__hint", text: "No email transport is configured in this deployment, so the link is surfaced here instead of being sent." })),
+        el("p", { class: "field__hint", text: "The invitation was also emailed. This copy is shown once in case delivery fails or the address was mistyped." })),
       footer: el("div", { class: "modal__foot" }, el("button", { class: "btn btn--primary", type: "button", onclick: closeModal }, "Done")),
       ownership,
     });

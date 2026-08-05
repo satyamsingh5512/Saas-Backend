@@ -391,7 +391,7 @@ func TestProtectedCredentialsHonorTenantAndUserStatus(t *testing.T) {
 		t.Fatalf("suspended tenant accepted JWT: %d %s", w.Code, w.Body.String())
 	}
 	oauthState := signedOAuthState(t, cfg.JWTSecret, slug)
-	if w = doJSON(router, http.MethodGet, "/api/v1/auth/oauth/google/callback?state="+oauthState+"&code=unused", nil, ""); w.Code != http.StatusForbidden {
+	if w = doJSON(router, http.MethodGet, "/api/v1/auth/oauth/github/callback?state="+oauthState+"&code=unused", nil, ""); w.Code != http.StatusForbidden {
 		t.Fatalf("suspended tenant reached OAuth exchange: %d %s", w.Code, w.Body.String())
 	}
 	if w = doJSON(router, http.MethodPost, "/api/v1/auth/refresh", map[string]string{"refresh_token": session.RefreshToken}, ""); w.Code != http.StatusForbidden {

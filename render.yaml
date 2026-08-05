@@ -28,6 +28,21 @@ services:
       - key: JWT_SECRET
         generateValue: true
 
+      # Outbound email via Resend. sync: false keeps the key out of the
+      # Blueprint: enter it in the dashboard once, and Render preserves it across
+      # deploys. Leaving it unset is a supported state -- the no-op transport logs
+      # each undeliverable message and every flow still mints and stores its
+      # token, so invitations remain usable from the dashboard link.
+      - key: RESEND_API_KEY
+        sync: false
+      # Must be on a domain verified in Resend, or every send is rejected.
+      - key: MAIL_FROM
+        sync: false
+      # Public origin used to build invite, reset and verification links. Set this
+      # to the service's own URL; a link built without it goes nowhere.
+      - key: APP_BASE_URL
+        sync: false
+
       - key: DATABASE_URL
         fromDatabase:
           name: tenant-saas-postgres

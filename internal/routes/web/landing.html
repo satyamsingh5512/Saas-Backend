@@ -545,7 +545,7 @@
               <h3 class="def__title">Authentication that survives a stolen token</h3>
               <p class="def__text">
                 Password login, refresh-token rotation with reuse detection,
-                password reset, email verification, and Google or GitHub OAuth.
+                password reset, email verification, and GitHub OAuth.
                 Changing a password revokes every refresh token for that user.
               </p>
               <ul class="def__facts">
@@ -830,16 +830,17 @@
             </details>
             <details class="qa">
               <summary class="qa__q">
-                Why is there no email being sent yet?
+                How is email delivered?
                 <svg class="icon icon--sm qa__chev" aria-hidden="true" focusable="false"><use href="#i-arrow-right"></use></svg>
               </summary>
               <div class="qa__a">
                 <p>
-                  Invitation, reset and verification tokens are published as
-                  domain events, but no transport is wired up — so this is stated
-                  plainly rather than implied. Until one is, the dashboard
-                  surfaces a new invite link directly so the flow is usable.
-                  Kafka publishing, Redis caching and S3 uploads are the same
+                  Invitation, password-reset and verification mail goes out
+                  through Resend, over one HTTPS call rather than an SDK. With no
+                  API key configured the transport falls back to a no-op that logs
+                  each undeliverable message, so the flows still work locally and
+                  the dashboard surfaces a new invite link directly. Kafka
+                  publishing, Redis caching and file uploads remain the other
                   shape: interfaces that degrade to no-ops.
                 </p>
               </div>

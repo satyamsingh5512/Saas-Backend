@@ -16,7 +16,6 @@ import (
 	"github.com/satym-in/tenant-saas-backend/pkg/apperror"
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/github"
-	"golang.org/x/oauth2/google"
 )
 
 // OAuthConfig holds the client credentials for each supported provider.
@@ -25,9 +24,6 @@ import (
 // start, so environments that haven't configured OAuth yet remain usable
 // for the rest of the API.
 type OAuthConfig struct {
-	GoogleClientID     string
-	GoogleClientSecret string
-	GoogleRedirectURL  string
 	GitHubClientID     string
 	GitHubClientSecret string
 	GitHubRedirectURL  string
@@ -38,16 +34,6 @@ type OAuthConfig struct {
 	// verifies the HMAC before trusting its contents (CSRF protection +
 	// tamper-evidence, standard OAuth2 state-parameter practice).
 	StateSecret string
-}
-
-func (c OAuthConfig) googleOAuth2Config() *oauth2.Config {
-	return &oauth2.Config{
-		ClientID:     c.GoogleClientID,
-		ClientSecret: c.GoogleClientSecret,
-		RedirectURL:  c.GoogleRedirectURL,
-		Scopes:       []string{"openid", "email", "profile"},
-		Endpoint:     google.Endpoint,
-	}
 }
 
 func (c OAuthConfig) githubOAuth2Config() *oauth2.Config {
@@ -123,11 +109,6 @@ func (s *Service) OAuthAuthorizeURL(provider, tenantSlug string) (string, error)
 	}
 
 	switch provider {
-	case ProviderGoogle:
-		if s.oauthCfg.GoogleClientID == "" {
-			return "", apperror.New(apperror.CodeUnprocessable, "google oauth is not configured")
-		}
-		return s.oauthCfg.googleOAuth2Config().AuthCodeURL(state), nil
 	case ProviderGitHub:
 		if s.oauthCfg.GitHubClientID == "" {
 			return "", apperror.New(apperror.CodeUnprocessable, "github oauth is not configured")
@@ -145,29 +126,6 @@ type providerProfile struct {
 	Email          string
 	FullName       string
 	AvatarURL      string
-}
-
-func fetchGoogleProfile(ctx context.Context, token *oauth2.Token, cfg *oauth2.Config) (*providerProfile, error) {
-	client := cfg.Client(ctx, token)
-	resp, err := client.Get("https://www.googleapis.com/oauth2/v3/userinfo")
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("google userinfo: status %d: %s", resp.StatusCode, body)
-	}
-	var payload struct {
-		Sub     string `json:"sub"`
-		Email   string `json:"email"`
-		Name    string `json:"name"`
-		Picture string `json:"picture"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
-		return nil, err
-	}
-	return &providerProfile{ProviderUserID: payload.Sub, Email: payload.Email, FullName: payload.Name, AvatarURL: payload.Picture}, nil
 }
 
 func fetchGitHubProfile(ctx context.Context, token *oauth2.Token, cfg *oauth2.Config) (*providerProfile, error) {
@@ -232,8 +190,8 @@ func fetchGitHubProfile(ctx context.Context, token *oauth2.Token, cfg *oauth2.Co
 // then either links it to an existing user (matched by email within the
 // initiating tenant), creates a new user, or logs in an already-linked
 // user -- and issues a token pair in every case. This is the single entry
-// point for both providers; provider-specific quirks are isolated in
-// fetchGoogleProfile/fetchGitHubProfile above.
+// point for the provider; its quirks are isolated in fetchGitHubProfile
+// above.
 func (s *Service) OAuthCallback(ctx context.Context, provider, code, stateRaw string) (*LoginResponse, error) {
 	state, err := s.decodeOAuthState(stateRaw)
 	if err != nil {
@@ -248,28 +206,17 @@ func (s *Service) OAuthCallback(ctx context.Context, provider, code, stateRaw st
 		return nil, apperror.New(apperror.CodeForbidden, "organization is not active")
 	}
 
-	var oauth2Cfg *oauth2.Config
-	switch provider {
-	case ProviderGoogle:
-		oauth2Cfg = s.oauthCfg.googleOAuth2Config()
-	case ProviderGitHub:
-		oauth2Cfg = s.oauthCfg.githubOAuth2Config()
-	default:
+	if provider != ProviderGitHub {
 		return nil, apperror.New(apperror.CodeValidation, "unsupported oauth provider")
 	}
+	oauth2Cfg := s.oauthCfg.githubOAuth2Config()
 
 	token, err := oauth2Cfg.Exchange(ctx, code)
 	if err != nil {
 		return nil, apperror.Wrap(apperror.CodeUnauthorized, "failed to exchange oauth code", err)
 	}
 
-	var profile *providerProfile
-	switch provider {
-	case ProviderGoogle:
-		profile, err = fetchGoogleProfile(ctx, token, oauth2Cfg)
-	case ProviderGitHub:
-		profile, err = fetchGitHubProfile(ctx, token, oauth2Cfg)
-	}
+	profile, err := fetchGitHubProfile(ctx, token, oauth2Cfg)
 	if err != nil || profile == nil || profile.Email == "" {
 		return nil, apperror.Wrap(apperror.CodeUnauthorized, "failed to fetch oauth profile", err)
 	}

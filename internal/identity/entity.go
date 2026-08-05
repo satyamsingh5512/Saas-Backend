@@ -66,8 +66,11 @@ type OAuthAccount struct {
 
 func (OAuthAccount) TableName() string { return "oauth_accounts" }
 
+// ProviderGitHub is the only OAuth provider wired up. The oauth_accounts
+// CHECK constraint (migrations/000005) still admits 'google', which is
+// deliberate: dropping a value from a CHECK would invalidate rows written
+// while that provider was supported. Nothing mints them any more.
 const (
-	ProviderGoogle = "google"
 	ProviderGitHub = "github"
 )
 
