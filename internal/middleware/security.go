@@ -19,17 +19,28 @@ import (
 // HSTS is only emitted when the request arrived over TLS. Sending it over plain
 // HTTP is ignored by browsers at best, and pinning HTTPS for a local
 // development host at worst.
+// ContentSecurityPolicy is the policy served with every response.
+//
+// connect-src is 'self' rather than an API origin because the UI only ever
+// talks to the API that served it. That stays true on the split Vercel/Render
+// deployment: Vercel proxies /api and /health to Render as same-origin
+// rewrites, so no cross-origin grant is needed there either. It is exported so
+// vercel.json can be checked against it -- the frontend host serves its own
+// headers, and a policy that drifts from this one would only fail in
+// production.
+const ContentSecurityPolicy = "default-src 'self'; " +
+	"script-src 'self'; " +
+	"style-src 'self'; " +
+	"img-src 'self' data:; " +
+	"font-src 'self'; " +
+	"connect-src 'self'; " +
+	"form-action 'self'; " +
+	"frame-ancestors 'none'; " +
+	"base-uri 'self'; " +
+	"object-src 'none'"
+
 func SecurityHeaders() gin.HandlerFunc {
-	const csp = "default-src 'self'; " +
-		"script-src 'self'; " +
-		"style-src 'self'; " +
-		"img-src 'self' data:; " +
-		"font-src 'self'; " +
-		"connect-src 'self'; " +
-		"form-action 'self'; " +
-		"frame-ancestors 'none'; " +
-		"base-uri 'self'; " +
-		"object-src 'none'"
+	const csp = ContentSecurityPolicy
 
 	return func(c *gin.Context) {
 		h := c.Writer.Header()
