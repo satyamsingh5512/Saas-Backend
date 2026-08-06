@@ -32,7 +32,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err := db.Migrate(database); err != nil {
+	if err := db.MigrateAtStartup(cfg, database, logger); err != nil {
 		logger.Error("failed to run migrations", slog.Any("error", err))
 		os.Exit(1)
 	}

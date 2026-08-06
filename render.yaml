@@ -50,6 +50,29 @@ services:
           name: tenant-saas-postgres
           property: connectionString
 
+      # The runtime credential above must be a NOSUPERUSER NOBYPASSRLS role, or
+      # row-level security is inert and every tenant sees every other tenant's
+      # rows. Managed providers do not give you one by default: Render's database
+      # user owns the tables (handled by FORCE ROW LEVEL SECURITY) and Aiven's
+      # avnadmin holds rolbypassrls, which FORCE does not override.
+      #
+      # MIGRATE_DATABASE_URL is the privileged credential, used only to apply
+      # migrations at startup and then closed before the server begins serving.
+      # It is required whenever DATABASE_URL points at the low-privilege role,
+      # because CREATE TABLE and CREATE POLICY are exactly the grants that role
+      # must not have. Leave it unset only when both are the same credential.
+      #
+      #   1. psql "$MIGRATE_DATABASE_URL" \
+      #        -v app_user_password="$(openssl rand -hex 24)" \
+      #        -f scripts/provision_app_role.sql
+      #   2. Set DATABASE_URL to that app_user connection string.
+      #   3. Set MIGRATE_DATABASE_URL to the privileged one.
+      #
+      # Verify with: SELECT current_user, rolsuper, rolbypassrls
+      #              FROM pg_roles WHERE rolname = current_user;
+      # - key: MIGRATE_DATABASE_URL
+      #   sync: false
+
       # Token lifetimes. A 15-minute access token bounds the damage from a leaked
       # bearer token; the refresh token rotates on every use with theft detection.
       - key: ACCESS_TOKEN_TTL

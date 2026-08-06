@@ -154,54 +154,44 @@ func (r *Repository) UpsertSubscription(ctx context.Context, sub *Subscription, 
 	return nil
 }
 
-// CountSeats returns the number of active (non-deleted) users in the tenant,
-// which is the unit plans are priced by.
-func (r *Repository) CountSeats(ctx context.Context) (int64, error) {
-	var count int64
-	err := txscope.WithTenantTx(ctx, r.db, func(tx *gorm.DB) error {
-		return tx.Table("users").Where("deleted_at IS NULL AND status <> ?", "disabled").Count(&count).Error
-	})
-	if err != nil {
-		return 0, fmt.Errorf("billing: count seats: %w", err)
-	}
-	return count, nil
+// UsageCounts holds every per-tenant total the billing views and quota checks
+// need.
+type UsageCounts struct {
+	Seats              int64
+	Projects           int64
+	Teams              int64
+	PendingInvitations int64
 }
 
-// CountProjects returns the tenant's live project count.
-func (r *Repository) CountProjects(ctx context.Context) (int64, error) {
-	var count int64
+// CountUsage gathers all four tenant totals in a single round trip.
+//
+// These were four separate methods, each opening its own transaction. Because
+// txscope has to BEGIN, set app.tenant_id, query, then COMMIT, every one of them
+// cost four round trips -- sixteen in total to produce four integers. On a
+// database a few milliseconds away that is invisible; against a cross-region
+// instance at ~240ms RTT it was roughly four seconds of a single request, and
+// GET /billing/usage was observed taking twelve.
+//
+// Scalar subqueries keep RLS intact: the policy is evaluated per referenced
+// table exactly as it would be in a standalone query, so this stays scoped to
+// the tenant set on the surrounding transaction. Counting pending invitations
+// here too costs nothing measurable and means one code path serves both the
+// usage view and the seat-quota check.
+func (r *Repository) CountUsage(ctx context.Context, now time.Time) (*UsageCounts, error) {
+	var counts UsageCounts
 	err := txscope.WithTenantTx(ctx, r.db, func(tx *gorm.DB) error {
-		return tx.Table("projects").Where("deleted_at IS NULL").Count(&count).Error
+		return tx.Raw(`
+			SELECT
+			    (SELECT count(*) FROM users
+			      WHERE deleted_at IS NULL AND status <> 'disabled')     AS seats,
+			    (SELECT count(*) FROM projects WHERE deleted_at IS NULL) AS projects,
+			    (SELECT count(*) FROM teams    WHERE deleted_at IS NULL) AS teams,
+			    (SELECT count(*) FROM invitations
+			      WHERE status = 'pending' AND expires_at > ?)           AS pending_invitations
+		`, now).Scan(&counts).Error
 	})
 	if err != nil {
-		return 0, fmt.Errorf("billing: count projects: %w", err)
+		return nil, fmt.Errorf("billing: count usage: %w", err)
 	}
-	return count, nil
-}
-
-// CountTeams returns the tenant's live team count.
-func (r *Repository) CountTeams(ctx context.Context) (int64, error) {
-	var count int64
-	err := txscope.WithTenantTx(ctx, r.db, func(tx *gorm.DB) error {
-		return tx.Table("teams").Where("deleted_at IS NULL").Count(&count).Error
-	})
-	if err != nil {
-		return 0, fmt.Errorf("billing: count teams: %w", err)
-	}
-	return count, nil
-}
-
-// CountPendingInvitations counts unexpired pending invites, which consume a seat
-// prospectively so a tenant cannot oversubscribe by inviting past its limit.
-func (r *Repository) CountPendingInvitations(ctx context.Context) (int64, error) {
-	var count int64
-	err := txscope.WithTenantTx(ctx, r.db, func(tx *gorm.DB) error {
-		return tx.Table("invitations").
-			Where("status = ? AND expires_at > ?", "pending", time.Now()).
-			Count(&count).Error
-	})
-	if err != nil {
-		return 0, fmt.Errorf("billing: count pending invitations: %w", err)
-	}
-	return count, nil
+	return &counts, nil
 }

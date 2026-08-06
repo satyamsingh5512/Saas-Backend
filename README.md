@@ -374,9 +374,23 @@ can pass against a stale copy.
   FROM pg_roles WHERE rolname = current_user;
   ```
 
-  Both flags must be false. If they are not, run
-  `scripts/provision_app_role.sql` with a real password, point `DATABASE_URL` at
-  that role, and leave `MIGRATE_DATABASE_URL` on the privileged one.
+  Both flags must be false. If they are not, provision the low-privilege role
+  and split the two credentials:
+
+  ```bash
+  psql "$MIGRATE_DATABASE_URL" \
+    -v app_user_password="$(openssl rand -hex 24)" \
+    -f scripts/provision_app_role.sql
+  ```
+
+  Then point `DATABASE_URL` at that role and leave `MIGRATE_DATABASE_URL` on the
+  privileged one. The script is idempotent and re-running it rotates the
+  password. It refuses to report success if the role ends up with either flag
+  set. `cmd/server` applies migrations on a separate short-lived pool using
+  `MIGRATE_DATABASE_URL`, so the runtime role never needs `CREATE POLICY`.
+
+  Note that `godotenv` does not override variables already exported in your
+  shell, so an exported `DATABASE_URL` silently shadows any `.env` edit.
 - Passwords use bcrypt. Invite tokens and API keys use SHA-256, which is correct
   only because they are 256 bits of uniform randomness rather than guessable
   secrets; they are also verified on hot paths where a slow KDF would dominate.

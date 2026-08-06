@@ -200,14 +200,11 @@ func (s *Service) CheckSeatQuota(ctx context.Context, tenantID uuid.UUID) error 
 		return nil // unlimited
 	}
 
-	seats, err := s.repo.CountSeats(ctx)
+	counts, err := s.repo.CountUsage(ctx, time.Now())
 	if err != nil {
-		return apperror.Wrap(apperror.CodeInternal, "failed to count seats", err)
+		return apperror.Wrap(apperror.CodeInternal, "failed to count seat usage", err)
 	}
-	pending, err := s.repo.CountPendingInvitations(ctx)
-	if err != nil {
-		return apperror.Wrap(apperror.CodeInternal, "failed to count pending invitations", err)
-	}
+	seats, pending := counts.Seats, counts.PendingInvitations
 
 	if seats+pending >= int64(*plan.MaxSeats) {
 		return apperror.New(apperror.CodeForbidden, fmt.Sprintf(
@@ -241,25 +238,17 @@ func (s *Service) activePlan(ctx context.Context) (*Plan, error) {
 }
 
 func (s *Service) currentUsage(ctx context.Context, planCode string, plan *Plan) (*Usage, error) {
-	seats, err := s.repo.CountSeats(ctx)
+	counts, err := s.repo.CountUsage(ctx, time.Now())
 	if err != nil {
-		return nil, apperror.Wrap(apperror.CodeInternal, "failed to count seats", err)
-	}
-	projectCount, err := s.repo.CountProjects(ctx)
-	if err != nil {
-		return nil, apperror.Wrap(apperror.CodeInternal, "failed to count projects", err)
-	}
-	teamCount, err := s.repo.CountTeams(ctx)
-	if err != nil {
-		return nil, apperror.Wrap(apperror.CodeInternal, "failed to count teams", err)
+		return nil, apperror.Wrap(apperror.CodeInternal, "failed to count usage", err)
 	}
 
 	return &Usage{
 		PlanCode:    planCode,
-		Seats:       seats,
+		Seats:       counts.Seats,
 		MaxSeats:    plan.MaxSeats,
-		Projects:    projectCount,
+		Projects:    counts.Projects,
 		MaxProjects: plan.MaxProjects,
-		Teams:       teamCount,
+		Teams:       counts.Teams,
 	}, nil
 }

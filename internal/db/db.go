@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/golang-migrate/migrate/v4"
@@ -25,13 +26,28 @@ import (
 // open connections until Postgres refuses them with "too many clients" --
 // turning a slowdown into a hard outage. A bounded pool queues instead.
 func Connect(cfg *config.Config) (*gorm.DB, error) {
-	logLevel := logger.Silent
+	// Development logs every statement. Other environments log only slow
+	// queries and errors: Silent hides the "SLOW SQL" warnings that are the
+	// first sign of a mislocated database, which is a diagnostic worth keeping
+	// in production, while full statement logging there would put tenant data
+	// and token hashes into log storage on every request.
+	gormLogger := logger.Default.LogMode(logger.Warn)
 	if cfg.Environment == "development" {
-		logLevel = logger.Info
+		gormLogger = logger.Default.LogMode(logger.Info)
 	}
 
 	database, err := gorm.Open(gormpostgres.Open(connectionDSN(cfg)), &gorm.Config{
-		Logger: logger.Default.LogMode(logLevel),
+		Logger: gormLogger,
+		// Cache the parsed/prepared form of every statement instead of
+		// re-preparing it per execution. With the extended protocol a fresh
+		// statement costs a describe round trip before the execute, so this
+		// removes one network round trip from most queries -- worth having in
+		// general, and worth a lot when the database is not local.
+		//
+		// This requires a direct PostgreSQL connection. Behind a transaction-mode
+		// pooler (PgBouncer, Supabase's 6543 port) prepared statements do not
+		// survive between statements and this must be turned off.
+		PrepareStmt: true,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("gorm open: %w", err)
@@ -59,6 +75,13 @@ func Connect(cfg *config.Config) (*gorm.DB, error) {
 	}
 
 	return database, nil
+}
+
+// DSN builds the PostgreSQL connection string for a config, preferring
+// DATABASE_URL over the individual DB_* values. Exported so callers can tell
+// whether a migration credential differs from the runtime one.
+func DSN(cfg *config.Config) string {
+	return connectionDSN(cfg)
 }
 
 func connectionDSN(cfg *config.Config) string {
@@ -100,9 +123,45 @@ func RunMigrations(sqlDB *sql.DB) error {
 	return nil
 }
 
-// Migrate is a convenience wrapper that extracts the underlying *sql.DB from
-// a *gorm.DB and applies all pending migrations. Callers that already have a
-// raw *sql.DB (e.g. cmd/migrate) should call RunMigrations directly instead.
+// MigrateAtStartup applies pending migrations before the server begins serving.
+//
+// It deliberately does not reuse the runtime connection when a MIGRATE_*
+// credential is configured. The runtime role is intentionally powerless:
+// NOSUPERUSER, NOBYPASSRLS, and holding no CREATE TABLE or CREATE POLICY grant,
+// because those are exactly the privileges that would let it ignore tenant
+// isolation. Migrations need all of them. Running both through one credential
+// forces a choice between "migrations work" and "RLS is enforced", and the
+// version that silently picks the first is the one that leaks tenant data.
+//
+// So when MIGRATE_DATABASE_URL (or MIGRATE_DB_*) differs from the runtime
+// credential, this opens a second short-lived pool for the migration and closes
+// it before serving starts. With no override configured it falls back to the
+// runtime connection, which keeps local development on a single superuser
+// credential working exactly as before.
+func MigrateAtStartup(cfg *config.Config, runtime *gorm.DB, log *slog.Logger) error {
+	migrateCfg := *cfg
+	migrateCfg.ApplyMigrationOverrides()
+
+	if DSN(&migrateCfg) == DSN(cfg) {
+		return Migrate(runtime)
+	}
+
+	log.Info("applying migrations with the dedicated migration credential")
+
+	migrateDB, err := Connect(&migrateCfg)
+	if err != nil {
+		return fmt.Errorf("connect with migration credential: %w", err)
+	}
+	defer func() {
+		if sqlDB, dbErr := migrateDB.DB(); dbErr == nil {
+			if closeErr := sqlDB.Close(); closeErr != nil {
+				log.Error("failed to close migration pool", slog.Any("error", closeErr))
+			}
+		}
+	}()
+
+	return Migrate(migrateDB)
+}
 func Migrate(database *gorm.DB) error {
 	sqlDB, err := database.DB()
 	if err != nil {
