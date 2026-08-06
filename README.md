@@ -337,6 +337,7 @@ make vet                make fmt                make tidy
 make db-up              make db-down
 make migrate-up         make migrate-down       make migrate-version
 make db-provision-app-role
+make check-web           make build-vercel
 ```
 
 Tests skip automatically when no database is reachable, so `go test ./...` stays
@@ -363,6 +364,19 @@ can pass against a stale copy.
 - Set a strong `JWT_SECRET` (32+ characters). The server refuses to start in
   production without one.
 - Run as a `NOSUPERUSER NOBYPASSRLS` database role, or RLS is silently inert.
+  `FORCE ROW LEVEL SECURITY` does not save you here: it makes a table's owner
+  obey its policy, but a role holding `BYPASSRLS` still ignores RLS entirely.
+  Managed providers hand you exactly such a role (Aiven's `avnadmin` has
+  `rolbypassrls`), so verify before trusting isolation:
+
+  ```sql
+  SELECT current_user, rolsuper, rolbypassrls
+  FROM pg_roles WHERE rolname = current_user;
+  ```
+
+  Both flags must be false. If they are not, run
+  `scripts/provision_app_role.sql` with a real password, point `DATABASE_URL` at
+  that role, and leave `MIGRATE_DATABASE_URL` on the privileged one.
 - Passwords use bcrypt. Invite tokens and API keys use SHA-256, which is correct
   only because they are 256 bits of uniform randomness rather than guessable
   secrets; they are also verified on hot paths where a slow KDF would dominate.
@@ -525,7 +539,71 @@ declared `FORCE ROW LEVEL SECURITY`, which applies the policy to the owner too.
 If you add a new tenant-scoped table, it needs both `ENABLE` and `FORCE`, or that
 one table will silently leak across tenants on exactly this kind of deployment.
 
-## 15) Not Yet Implemented
+## 15) Split Deployment: Frontend on Vercel, API on Render
+
+`vercel.json` deploys the same `internal/routes/web` directory the binary embeds
+as a static site, so the two cannot serve different UIs. There is still no build
+step — `scripts/build_vercel_static.sh` only copies the directory and swaps which
+document is the directory index, because Vercel resolves `/` from the filesystem
+before it consults a rewrite, and `index.html` is the dashboard rather than the
+landing page. The landing page becomes `index.html` and the dashboard becomes
+`app.html`, which a rewrite serves at `/app`.
+
+**Vercel proxies the API rather than calling it cross-origin.** `/api/*` and
+`/health*` are rewritten to the Render service, so the browser only ever makes
+same-origin requests. This is the reason the split costs nothing in security
+posture:
+
+- No CORS grant is issued on a credential-bearing API. `CORS_ALLOWED_ORIGINS`
+  stays empty.
+- The CSP keeps `connect-src 'self'`. Nothing is relaxed to reach the API.
+- Access tokens in `sessionStorage` stay same-origin with the code that reads
+  them.
+- Vercel's per-deploy preview hostnames work automatically. An exact-match CORS
+  allowlist would have broken on every one of them, and there is no wildcard
+  mode by design.
+- `app.js` and `landing.js` are unchanged: no API base URL to configure, and so
+  no way for it to drift per environment.
+
+The cost is an extra network hop through Vercel's edge on every API call, and
+that the backend URL is literal in `vercel.json` (rewrite destinations cannot
+read environment variables). Change it there when the Render URL changes.
+
+Deploying:
+
+1. Deploy the backend to Render first and note its URL.
+2. Set that URL as the rewrite destination in `vercel.json` (three entries).
+3. In Vercel, import the repository. Framework preset **Other**; the build
+   command and output directory come from `vercel.json`.
+4. On Render, set `APP_BASE_URL` to the Vercel origin so invite, reset and
+   verification links land on the frontend.
+
+Three tests in `internal/routes/web_vercel_test.go` keep the two deployments
+honest: the CSP in `vercel.json` must equal `middleware.ContentSecurityPolicy`
+exactly, the `/api` proxy must exist and must precede the SPA catch-all, and the
+build script must copy from the embedded directory and produce the documents the
+rewrites target. Each of these fails only in production otherwise — the frontend
+host serves its own headers, so nothing else would catch a drift.
+
+If you would rather call the API directly cross-origin, set
+`CORS_ALLOWED_ORIGINS` to the Vercel origin and add that origin to `connect-src`
+in both the middleware and `vercel.json`. Preview deployments will not work
+without widening the allowlist further.
+
+### Tenant subdomains and shared hosting domains
+
+`TENANT_BASE_DOMAIN` must stay unset on `*.onrender.com` and `*.vercel.app`.
+Subdomain tenant routing only makes sense relative to an apex you own: under a
+shared hosting domain the leftmost label is the service name, not a tenant slug,
+and inferring a tenant from it makes every pre-authentication lookup fail. Set it
+only once tenants live at `acme.yourdomain.com`, and set it to `yourdomain.com`.
+
+An unresolvable hostname label is not fatal — it falls through as "no tenant" and
+lets the credential establish one, since the design treats the hostname as a
+routing hint rather than an assertion. An unresolvable `X-Tenant-ID` header is
+still a 404, because there the client explicitly named a tenant.
+
+## 16) Not Yet Implemented
 
 Interfaces exist and degrade to no-ops, so these can be added without touching
 call sites:
