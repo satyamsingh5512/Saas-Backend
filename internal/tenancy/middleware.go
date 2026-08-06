@@ -23,6 +23,18 @@ import (
 type Resolver struct {
 	repo  *Repository
 	cache CacheReader
+
+	// baseDomain is the apex under which tenant subdomains live, e.g.
+	// "ourapp.com" so that "acme.ourapp.com" resolves tenant "acme". Empty
+	// disables subdomain inference entirely, leaving X-Tenant-ID as the only
+	// pre-auth hint.
+	//
+	// This must be configured rather than guessed. A "more than two labels
+	// means the first one is a tenant" heuristic breaks on every shared
+	// hosting domain -- on foo.onrender.com or foo.vercel.app it reads the
+	// service name as a tenant slug, fails to resolve it, and rejects every
+	// request to the deployment.
+	baseDomain string
 }
 
 // CacheReader is satisfied by the Redis-backed tenant metadata cache
@@ -35,8 +47,12 @@ type CacheReader interface {
 	SetTenantBySlug(ctx context.Context, slug string, tenant *Tenant, ttl time.Duration)
 }
 
-func NewResolver(repo *Repository, cache CacheReader) *Resolver {
-	return &Resolver{repo: repo, cache: cache}
+// NewResolver builds the pre-auth tenant resolver. baseDomain enables
+// subdomain-based tenant routing; pass "" to rely solely on X-Tenant-ID, which
+// is the correct setting on any host whose subdomain is not a tenant name.
+func NewResolver(repo *Repository, cache CacheReader, baseDomain string) *Resolver {
+	normalized := strings.ToLower(strings.Trim(strings.TrimSpace(baseDomain), "."))
+	return &Resolver{repo: repo, cache: cache, baseDomain: normalized}
 }
 
 const tenantCacheTTL = 5 * time.Minute
@@ -60,24 +76,52 @@ func (r *Resolver) Resolve(ctx context.Context, slug string) (*Tenant, error) {
 	return tenant, nil
 }
 
+// reservedSubdomains are labels that are never tenant slugs, even directly
+// under the configured base domain, so that conventional infrastructure
+// hostnames cannot be shadowed by (or mistaken for) a tenant.
+var reservedSubdomains = map[string]struct{}{
+	"www": {}, "api": {}, "app": {}, "admin": {}, "static": {},
+	"assets": {}, "cdn": {}, "mail": {}, "status": {},
+}
+
 // slugFromRequest extracts a tenant slug from either the X-Tenant-ID header
-// (API clients) or the leftmost subdomain label (browser clients hitting
-// acme.ourapp.com). Header takes precedence since API clients rarely set a
-// meaningful Host subdomain.
-func slugFromRequest(c *gin.Context) string {
+// (API clients) or the leftmost subdomain label of a host under the configured
+// base domain (browser clients hitting acme.ourapp.com). Header takes
+// precedence since API clients rarely set a meaningful Host subdomain.
+//
+// fromHeader reports which source produced the slug. The two are not equally
+// authoritative: a header is the client explicitly asserting a tenant, whereas
+// a hostname label is an inference the caller may know nothing about.
+func (r *Resolver) slugFromRequest(c *gin.Context) (slug string, fromHeader bool) {
 	if header := strings.TrimSpace(c.GetHeader("X-Tenant-ID")); header != "" {
-		return header
+		return header, true
+	}
+
+	if r.baseDomain == "" {
+		return "", false
 	}
 
 	host := c.Request.Host
 	if h, _, err := splitHostPort(host); err == nil {
 		host = h
 	}
-	labels := strings.Split(host, ".")
-	if len(labels) > 2 { // e.g. acme.ourapp.com -> "acme"
-		return labels[0]
+	host = strings.ToLower(strings.Trim(strings.TrimSpace(host), "."))
+
+	suffix := "." + r.baseDomain
+	if !strings.HasSuffix(host, suffix) {
+		return "", false
 	}
-	return ""
+
+	label := strings.TrimSuffix(host, suffix)
+	// An empty label is the apex itself; a dotted one is deeper nesting than
+	// the single-label tenant scheme describes. Neither names a tenant.
+	if label == "" || strings.Contains(label, ".") {
+		return "", false
+	}
+	if _, reserved := reservedSubdomains[label]; reserved {
+		return "", false
+	}
+	return label, false
 }
 
 func splitHostPort(host string) (string, string, error) {
@@ -98,7 +142,7 @@ func splitHostPort(host string) (string, string, error) {
 // on this middleware's resolution since there is no JWT yet.
 func (r *Resolver) Middleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		slug := slugFromRequest(c)
+		slug, fromHeader := r.slugFromRequest(c)
 		if slug == "" {
 			// No tenant hint on the request at all. Some routes (health
 			// checks, OAuth provider callbacks that embed tenant in state)
@@ -111,6 +155,15 @@ func (r *Resolver) Middleware() gin.HandlerFunc {
 
 		tenant, err := r.Resolve(c.Request.Context(), slug)
 		if err != nil {
+			if !fromHeader {
+				// The slug came from the hostname, which this design treats as
+				// a routing hint rather than an assertion. An unknown label
+				// must fall through as "no tenant" and let authentication
+				// establish one, not reject the request -- otherwise a
+				// deployment on an unexpected hostname 404s every route.
+				c.Next()
+				return
+			}
 			apiresponse.Error(c, apperror.CodeNotFound.HTTPStatus(), string(apperror.CodeNotFound), "tenant not found")
 			return
 		}
