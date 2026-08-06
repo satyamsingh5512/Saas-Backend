@@ -31,8 +31,18 @@ type Config struct {
 	// CORSAllowedOrigins is an explicit allow-list of browser origins
 	// permitted to call the API cross-origin. Empty (the default) disables
 	// CORS entirely, which is correct while the dashboard is served from the
-	// same origin as the API.
+	// same origin as the API, or reached through a same-origin proxy.
 	CORSAllowedOrigins []string
+
+	// TenantBaseDomain is the apex under which tenant subdomains live, e.g.
+	// "ourapp.com" so acme.ourapp.com resolves the "acme" tenant pre-auth.
+	// Empty (the default) disables subdomain inference, leaving X-Tenant-ID and
+	// the authenticated credential as the tenant sources.
+	//
+	// Leave it unset on a shared hosting domain such as *.onrender.com: the
+	// service name is not a tenant slug, and treating it as one makes every
+	// pre-auth lookup fail.
+	TenantBaseDomain string
 
 	// Connection pool sizing. Defaults are tuned for a small managed Postgres
 	// instance: exceeding the server's max_connections is a far more common
@@ -110,6 +120,7 @@ func Load() *Config {
 		Environment:  getEnv("APP_ENV", "development"),
 
 		CORSAllowedOrigins: getEnvList("CORS_ALLOWED_ORIGINS"),
+		TenantBaseDomain:   strings.TrimSpace(os.Getenv("TENANT_BASE_DOMAIN")),
 
 		DBMaxOpenConns:    getEnvInt("DB_MAX_OPEN_CONNS", 25),
 		DBMaxIdleConns:    getEnvInt("DB_MAX_IDLE_CONNS", 5),
