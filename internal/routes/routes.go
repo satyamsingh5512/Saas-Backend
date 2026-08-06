@@ -64,7 +64,7 @@ func Setup(db *gorm.DB, cfg *config.Config) *gin.Engine {
 
 	// --- Module wiring (dependency injection root) ---
 	tenantRepo := tenancy.NewRepository(db)
-	tenantResolver := tenancy.NewResolver(tenantRepo, nil) // nil cache until Redis phase
+	tenantResolver := tenancy.NewResolver(tenantRepo, nil, cfg.TenantBaseDomain) // nil cache until Redis phase
 
 	authzRepo := authz.NewRepository(db)
 	authzService := authz.NewService(authzRepo, nil) // nil cache until Redis phase
@@ -142,6 +142,15 @@ func Setup(db *gorm.DB, cfg *config.Config) *gin.Engine {
 	router.GET("/health", healthHandler.Health)
 	router.GET("/health/ready", healthHandler.Ready)
 	router.GET("/health/live", healthHandler.Live)
+
+	// The static documents and assets are registered before tenant resolution
+	// too, and for the same reason: they are identical for every tenant, so
+	// resolving one is both pointless and a failure mode. Gin binds the
+	// middleware chain at registration time, so ordering here is what keeps a
+	// stylesheet request off the database entirely -- including the NoRoute
+	// fallback, which would otherwise make an unknown hostname 404 the
+	// dashboard instead of serving it.
+	registerWebRoutes(router)
 
 	router.Use(tenantResolver.Middleware())
 
@@ -276,7 +285,6 @@ func Setup(db *gorm.DB, cfg *config.Config) *gin.Engine {
 		}
 	}
 
-	registerWebRoutes(router)
 	return router
 }
 
