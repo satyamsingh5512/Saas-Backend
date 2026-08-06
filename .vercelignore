@@ -1,0 +1,17 @@
+# Vercel hosts the static workspace only; the API runs on Render.
+#
+# Excluding go.mod matters beyond upload size: with it present Vercel detects a
+# Go project and tries to build serverless functions out of the backend, which
+# fails and is not what this deployment is for.
+*.go
+go.mod
+go.sum
+cmd/
+pkg/
+migrations/
+Dockerfile
+docker-compose*.yml
+Makefile
+render.yaml
+scripts/provision_app_role.sql
+.env.example
