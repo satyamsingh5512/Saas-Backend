@@ -39,7 +39,9 @@ services:
       - key: MAIL_FROM
         sync: false
       # Public origin used to build invite, reset and verification links. Set this
-      # to the service's own URL; a link built without it goes nowhere.
+      # to whichever origin a recipient should land on: the Vercel domain when the
+      # frontend is deployed there, otherwise this service's own URL. A link built
+      # without it goes nowhere.
       - key: APP_BASE_URL
         sync: false
 
@@ -81,12 +83,23 @@ services:
       - key: SHUTDOWN_TIMEOUT
         value: 20s
 
-      # CORS stays disabled: the dashboard is served from the same origin as the
-      # API, so no cross-origin grant is needed. Set this only if you later host a
-      # separate frontend. There is no wildcard mode by design — responses carry
+      # Subdomain tenant routing is off. Render serves this service from
+      # <name>.onrender.com, where the leftmost label is the service name and not
+      # a tenant slug -- inferring a tenant from it makes every pre-auth lookup
+      # fail. Set this only once tenants live on subdomains of a domain you own,
+      # and set it to that apex (e.g. ourapp.com), never to onrender.com.
+      # - key: TENANT_BASE_DOMAIN
+      #   value: ourapp.com
+
+      # CORS stays disabled, including with the frontend on Vercel. vercel.json
+      # rewrites /api and /health to this service, so the browser only ever makes
+      # same-origin requests and no cross-origin grant is required. Set this only
+      # if you drop the proxy and call this API directly from another origin;
+      # note that an exact-match list will not cover Vercel's per-deploy preview
+      # hostnames. There is no wildcard mode by design — responses carry
       # credentials.
       # - key: CORS_ALLOWED_ORIGINS
-      #   value: https://app.example.com
+      #   value: https://your-app.vercel.app
 
 databases:
   - name: tenant-saas-postgres
