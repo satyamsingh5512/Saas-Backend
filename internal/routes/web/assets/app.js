@@ -198,6 +198,14 @@
       return plan.code === "free" ? "Free" : "Custom";
     },
     limit(v) { return v === null || v === undefined ? "Unlimited" : String(v); },
+    bytes(v) {
+      const n = Number(v);
+      if (!Number.isFinite(n) || n < 0) return "—";
+      if (n < 1024) return `${n} B`;
+      if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+      if (n < 1024 * 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+      return `${(n / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+    },
     initials(name, fallback) {
       const src = (name || fallback || "?").trim();
       const parts = src.split(/\s+/).filter(Boolean);
@@ -234,7 +242,7 @@
       Save: "Saving…", Create: "Creating…", Send: "Sending…", Add: "Adding…",
       Change: "Changing…", Accept: "Accepting…", Retry: "Retrying…", Reload: "Loading…",
       Delete: "Deleting…", Revoke: "Revoking…", Cancel: "Canceling…", Switch: "Switching…",
-      Remove: "Removing…",
+      Remove: "Removing…", Upload: "Uploading…",
     };
     return verbs[first] || "Working…";
   }
@@ -299,17 +307,18 @@
     return err;
   }
 
-  async function call(path, opts = {}, retried = false, requestEpoch = sessionEpoch) {
-    const { method = "GET", body, auth = true, raw = false, signal, headers: extraHeaders = {} } = opts;
+	async function call(path, opts = {}, retried = false, requestEpoch = sessionEpoch) {
+    const { method = "GET", body, auth = true, raw = false, binary = false, signal, headers: extraHeaders = {} } = opts;
+		const multipart = typeof FormData !== "undefined" && body instanceof FormData;
 
-    const headers = { Accept: "application/json", ...extraHeaders };
-    if (body !== undefined) headers["Content-Type"] = "application/json";
+		const headers = { Accept: "application/json", ...extraHeaders };
+		if (body !== undefined && !multipart) headers["Content-Type"] = "application/json";
     const accessUsed = auth ? state.access : null;
     if (accessUsed) headers.Authorization = `Bearer ${accessUsed}`;
 
     let res;
     try {
-      res = await fetch(API + path, { method, headers, signal, body: body === undefined ? undefined : JSON.stringify(body) });
+			res = await fetch(API + path, { method, headers, signal, body: body === undefined ? undefined : multipart ? body : JSON.stringify(body) });
     } catch (err) {
       if (isAbort(err)) throw err;
       throw new ApiError(0, "NETWORK", "Cannot reach the server.");
@@ -347,12 +356,14 @@
       signOut(true);
     }
 
+    if (binary && res.ok) return res;
     const payload = res.status === 204 ? null : await res.json().catch(() => null);
 
     if (!res.ok) {
       const e = (payload && payload.error) || {};
       throw new ApiError(res.status, e.code || "ERROR", e.message || `Request failed (${res.status})`);
     }
+    if (binary) return res;
     if (raw) {
       return { items: (payload && payload.data) || [], page: (payload && payload.meta && payload.meta.pagination) || null };
     }
@@ -1042,7 +1053,7 @@
     title: `Good to see you, ${(state.profile.full_name || "there").split(" ")[0]}`,
     desc: `${state.profile.organization.name} · you hold the ${state.profile.roles[0] || "member"} role.`,
     action: "Refresh",
-    content: el("div", { class: "stack" }, kpiSkeleton(), el("div", { class: "card" }, tableSkeleton(3, 4))),
+    content: el("div", { class: "stack" }, kpiSkeleton(5), el("div", { class: "card" }, tableSkeleton(3, 4))),
   },
     async (signal) => {
       const [usage, activity] = await Promise.all([
@@ -1062,9 +1073,15 @@
       const kpis = el("div", { class: "kpis" });
       if (usage.kind === "ready") {
         const usageData = usage.value;
+        const storageBytes = Number(usageData.storage_bytes) || 0;
+        const storageMaxMB = usageData.max_storage_mb;
+        const storageKpi = storageMaxMB == null
+          ? { foot: `${fmt.bytes(storageBytes)} used · unlimited` }
+          : { meter: { used: Math.round((storageBytes / (1024 * 1024)) * 10) / 10, max: storageMaxMB } };
         kpis.append(
           kpi({ label: "Seats", value: usageData.seats, glyph: "users", meter: { used: usageData.seats, max: usageData.max_seats } }),
           kpi({ label: "Projects", value: usageData.projects, glyph: "folder", meter: { used: usageData.projects, max: usageData.max_projects } }),
+          kpi({ label: "Storage", value: fmt.bytes(storageBytes), glyph: "inbox", ...storageKpi }),
           kpi({ label: "Teams", value: usageData.teams, glyph: "team", foot: "No plan limit" }),
           kpi({ label: "Plan", value: fmt.title(usageData.plan_code), glyph: "card", foot: "Current subscription" }));
       } else {
@@ -1129,6 +1146,7 @@
   const q = {
     projects: { page: 1, search: "", status: "" },
     teams: { page: 1, search: "" },
+    files: { page: 1 },
     members: { page: 1, invitePage: 1 },
     apiKeys: { page: 1 },
     notifications: { page: 1 },
@@ -1249,6 +1267,91 @@
       },
     });
   }
+
+  /* --- Files --- */
+
+  async function downloadFile(file) {
+    const response = await call(`/files/${file.id}/download`, { binary: true });
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    const anchor = el("a", { href: url, download: file.original_name, hidden: true });
+    document.body.append(anchor);
+    anchor.click();
+    anchor.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  pages.files = () => view({
+    title: "Files", desc: "Tenant-scoped attachments stored with plan-enforced storage limits.",
+    content: el("div", { class: "stack" }, el("div", { class: "card" }, tableSkeleton(5))),
+  },
+    (signal) => list(`/files?page=${q.files.page}&page_size=20`, { signal }),
+    (files) => {
+      let selected = null;
+      const input = el("input", { class: "input", id: "file-upload", type: "file" });
+      const status = el("p", { class: "field__hint", text: "Choose a file to upload." });
+      const upload = el("button", { class: "btn btn--primary", type: "button", disabled: true }, icon("plus"), "Upload file");
+      input.addEventListener("change", () => {
+        selected = input.files && input.files[0] ? input.files[0] : null;
+        upload.disabled = !selected;
+        status.textContent = selected ? `${selected.name} · ${fmt.bytes(selected.size)}` : "Choose a file to upload.";
+      });
+      upload.addEventListener("click", async () => {
+        if (!selected) return;
+        const form = new FormData();
+        form.append("file", selected);
+        const stopBusy = setButtonBusy(upload, "Uploading…");
+        try {
+          await call("/files", { method: "POST", body: form });
+          toast("File uploaded", "ok");
+          refreshRoute("files");
+        } catch (err) {
+          if (shouldSurfaceAsyncError(err)) toast(err.message, "err");
+        } finally {
+          stopBusy();
+        }
+      });
+
+      const page = el("div", { class: "page" },
+        pageHead("Files", "Tenant-scoped attachments stored with plan-enforced storage limits."));
+      if (can("file:upload")) {
+        page.append(el("section", { class: "card" },
+          el("div", { class: "card__head" }, el("div", {}, el("h2", { class: "card__title", text: "Upload a file" }),
+            el("p", { class: "card__sub", text: "Files are private to this organization and can be downloaded only by authorized members." }))),
+          el("div", { class: "card__body" }, el("div", { class: "field" },
+            el("label", { class: "field__label", for: "file-upload", text: "Attachment" }), input,
+            status), el("div", { class: "modal__foot" }, upload))));
+      }
+
+      const card = el("section", { class: "card" });
+      if (!files.items.length) {
+        card.append(emptyState("inbox", "No files", can("file:upload") ? "Upload the first attachment for this workspace." : "No attachments are available yet."));
+      } else {
+        const rows = files.items.map((file) => {
+          const actions = el("div", { class: "row-actions" },
+            rowBtn("inbox", "Download", async () => {
+              try { await downloadFile(file); } catch (err) { if (shouldSurfaceAsyncError(err)) toast(err.message, "err"); }
+            }));
+          if (can("file:delete")) actions.append(rowBtn("trash", "Delete", () => confirmModal({
+            title: "Delete file?", desc: `“${file.original_name}” will be removed permanently.`, confirm: "Delete file",
+            onConfirm: async () => { await call(`/files/${file.id}`, { method: "DELETE" }); toast("File deleted", "ok"); refreshRoute("files"); },
+          }), true));
+          return el("tr", {},
+            el("td", {}, el("div", { class: "cell" }, el("span", { class: "cell__main", text: file.original_name }), el("span", { class: "cell__sub mono", text: file.sha256.slice(0, 12) + "…" }))),
+            el("td", { class: "num" }, fmt.bytes(file.size_bytes)),
+            el("td", {}, el("span", { class: "cell--muted", text: file.content_type })),
+            el("td", {}, el("span", { class: "cell--muted", text: fmt.date(file.created_at) })),
+            el("td", { class: "actions" }, actions));
+        });
+        card.append(table([
+          { label: "File" }, { label: "Size", num: true }, { label: "Type" }, { label: "Uploaded" }, { actions: true },
+        ], rows, "Files"));
+        const filePager = pager(files.page, (n) => { q.files.page = n; refreshRoute("files"); });
+        if (filePager) card.append(filePager);
+      }
+      page.append(card);
+      return page;
+    });
 
   /* --- Teams --- */
 
@@ -1717,7 +1820,7 @@
     "org:view", "member:view", "member:invite", "role:view",
     "team:view", "team:create", "team:manage",
     "project:view", "project:create", "project:manage", "project:delete",
-    "apikey:view", "billing:view", "file:upload", "file:delete", "audit:view",
+    "apikey:view", "billing:view", "file:view", "file:upload", "file:delete", "audit:view",
   ];
 
   pages["api-keys"] = () => view({
@@ -1816,7 +1919,7 @@
   pages.billing = () => view({
     title: "Billing", desc: "Quota limits are enforced by the API, not merely displayed here.",
     action: can("billing:manage") ? "Cancel plan" : null,
-    content: el("div", { class: "stack" }, kpiSkeleton(), el("div", { class: "card" }, tableSkeleton(3, 3))),
+    content: el("div", { class: "stack" }, kpiSkeleton(5), el("div", { class: "card" }, tableSkeleton(3, 3))),
   },
     async (signal) => {
       const [plans, sub, usage] = await Promise.all([
@@ -1843,9 +1946,15 @@
       const page = el("div", { class: "page" },
         pageHead("Billing", "Quota limits are enforced by the API, not merely displayed here.", cancel));
 
+      const storageBytes = Number(usage.storage_bytes) || 0;
+      const storageMaxMB = usage.max_storage_mb;
+      const storageKpi = storageMaxMB == null
+        ? { foot: `${fmt.bytes(storageBytes)} used · unlimited` }
+        : { meter: { used: Math.round((storageBytes / (1024 * 1024)) * 10) / 10, max: storageMaxMB } };
       const kpis = el("div", { class: "kpis" },
         kpi({ label: "Seats", value: usage.seats, glyph: "users", meter: { used: usage.seats, max: usage.max_seats } }),
         kpi({ label: "Projects", value: usage.projects, glyph: "folder", meter: { used: usage.projects, max: usage.max_projects } }),
+        kpi({ label: "Storage", value: fmt.bytes(storageBytes), glyph: "inbox", ...storageKpi }),
         kpi({ label: "Teams", value: usage.teams, glyph: "team", foot: "No plan limit" }),
         kpi({ label: "Current plan", value: current.name, glyph: "card", foot: fmt.price(current) + (current.price_cents ? " / month" : "") }));
 
@@ -2281,7 +2390,7 @@
 
   const TITLES = {
     overview: "Overview", projects: "Projects", teams: "Teams", members: "Members",
-    roles: "Roles", "api-keys": "API keys", billing: "Billing", audit: "Audit log", settings: "Settings",
+    roles: "Roles", "api-keys": "API keys", files: "Files", billing: "Billing", audit: "Audit log", settings: "Settings",
   };
 
   function route() {
