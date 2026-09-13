@@ -99,6 +99,7 @@ const (
 	PermAPIKeyView    = "apikey:view"
 	PermBillingManage = "billing:manage"
 	PermBillingView   = "billing:view"
+	PermFileView      = "file:view"
 	PermFileUpload    = "file:upload"
 	PermFileDelete    = "file:delete"
 	PermAuditView     = "audit:view"
@@ -125,6 +126,7 @@ func GrantableScopes() []string {
 		PermProjectDelete,
 		PermAPIKeyView,
 		PermBillingView,
+		PermFileView,
 		PermFileUpload,
 		PermFileDelete,
 		PermAuditView,
