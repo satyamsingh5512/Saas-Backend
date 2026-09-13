@@ -34,32 +34,33 @@
 :root {
   color-scheme: light dark;
 
-  /* Brand — HackerRank green (from Figma Hack-1/Hack-2: accent #2EC866).
-     One accent; every state derives from these steps. --brand-600 is deepened
-     so white button text keeps 3:1+ contrast; --brand-300 is the dark-mode ink. */
-  --brand-50: #eafbef;
-  --brand-100: #d6f5df;
-  --brand-200: #a9e9bd;
-  --brand-300: #6fd795;
-  --brand-500: #2ec866;
-  --brand-600: #1da851;
-  --brand-700: #157a3c;
-  --brand-800: #0f5c2e;
+  /* Brand - original Tenancy aubergine palette. The supplied reference's
+     warmth is applied as a token system, not as borrowed branding, copy, or
+     product imagery. --brand-600 is the accessible filled-action surface;
+     --brand-300 is the lifted accent used on dark surfaces. */
+  --brand-50: #f9f0ff;
+  --brand-100: #efd9f4;
+  --brand-200: #d9bdde;
+  --brand-300: #b78ac1;
+  --brand-500: #611f69;
+  --brand-600: #4a154b;
+  --brand-700: #481a54;
+  --brand-800: #2e0c2e;
 
-  /* Neutral ramp — cool slate, ordered by elevation rather than lightness:
-     n-0 is paper, n-50 is the recessed canvas, n-100/200 are fills,
-     n-300 is a strong hairline, n-400..600 is secondary ink, n-900 is ink. */
+  /* Warm neutral ramp. n-0 is paper, n-50 is the cream recessed canvas,
+     n-100/200 are fills, n-300 is a strong hairline, and n-400..600 carry
+     secondary ink without introducing a competing accent. */
   --n-0: #ffffff;
-  --n-50: #f8fafc;
-  --n-100: #f1f5f9;
-  --n-200: #e2e8f0;
-  --n-300: #cbd5e1;
-  --n-400: #94a3b8;
-  --n-500: #64748b;
-  --n-600: #475569;
-  --n-700: #334155;
-  --n-800: #1e293b;
-  --n-900: #0f172a;
+  --n-50: #f8f4f6;
+  --n-100: #f4ede4;
+  --n-200: #e6e0e3;
+  --n-300: #cfc4ca;
+  --n-400: #a89aa3;
+  --n-500: #696969;
+  --n-600: #50474d;
+  --n-700: #3a3038;
+  --n-800: #2b222a;
+  --n-900: #1d1d1d;
 
   /* Semantic surfaces */
   --canvas: var(--n-50);
@@ -113,27 +114,32 @@
 
   --brand-fg: var(--brand-600);
   --brand-on: #ffffff;
+  --canvas-cream: var(--n-100);
+  --canvas-lavender: var(--brand-50);
+  --surface-aubergine: var(--brand-600);
+  --link-fg: #1264a3;
   /* Tints are mixed from their own foreground against the current paper, so a
      scheme change needs no second set of literals. */
   --brand-subtle: color-mix(in srgb, var(--brand-600) 10%, var(--surface));
   --brand-tint: color-mix(in srgb, var(--brand-600) 16%, var(--surface));
 
-  /* Status — text/tint pairs. Badges never use a solid fill; too loud. */
-  --ok-fg: #15803d;
-  --warn-fg: #a16207;
-  --err-fg: #b91c1c;
-  --info-fg: #1d4ed8;
-  --err-solid: #dc2626;
+  /* Status pairs retain their semantic meaning while matching the warmer
+     palette. Each foreground is chosen to remain readable on its generated
+     surface tint. */
+  --ok-fg: #007a5a;
+  --warn-fg: #8a5b00;
+  --err-fg: #cc4117;
+  --info-fg: #1264a3;
+  --err-solid: #cc4117;
   --ok-bg: color-mix(in srgb, var(--ok-fg) 13%, var(--surface));
   --warn-bg: color-mix(in srgb, var(--warn-fg) 14%, var(--surface));
   --err-bg: color-mix(in srgb, var(--err-fg) 12%, var(--surface));
   --info-bg: color-mix(in srgb, var(--info-fg) 12%, var(--surface));
 
-  /* Type — Poppins first per the HackerRank Figma (Poppins/Montserrat), with no
-     webfont download: font-src is 'self', so an absent Poppins falls back to
-     the system stack with identical metrics handling. */
-  --sans: "Poppins", "Inter", "Geist", -apple-system, BlinkMacSystemFont, "Segoe UI",
-    "SF Pro Text", system-ui, sans-serif;
+  /* The requested proprietary families are not distributed with this product,
+     and CSP permits no external font origin. Aptos and Segoe UI provide a local
+     humanist-sans feel; system-ui remains the reliable fallback. */
+  --sans: "Aptos", "Segoe UI", -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
   --mono: "JetBrains Mono", "SF Mono", ui-monospace, Menlo, Consolas, monospace;
 
   /* Type scale — declared in rem, named by the pixel value each step renders at
@@ -345,7 +351,7 @@
      ramp — `--n-900` is near-white once the ramp is re-pointed for dark. It is
      true black rather than a tinted navy: the brand radials painted over it are
      the only colour on that panel, and any base tint mutes them. */
-  --art-ink: #000000;
+  --art-ink: #241027;
 
   /* Layout — sidebar is 268px per the Figma Hack-1/Hack-2 frames. */
   --sidebar: 268px;
@@ -409,55 +415,40 @@
        and every hairline into a drawn box. Do not "fix" them by spreading them
        out; the tightness is what makes the surface feel expensive rather than
        wireframed. */
-    --n-0: #171717;
-    --n-50: #000000;
-    --n-100: #232323;
-    --n-200: #272727;
-    --n-300: #363636;
-    --n-400: #5e5e5e;
-    --n-500: #8f8f8f;
-    --n-600: #b4b4b4;
-    --n-700: #d4d4d4;
-    --n-800: #ebebeb;
-    --n-900: #f7f7f7;
+    --n-0: #2e1731;
+    --n-50: #1d0b20;
+    --n-100: #3a1c3d;
+    --n-200: #4a234c;
+    --n-300: #68466a;
+    --n-400: #947c97;
+    --n-500: #b8a3bb;
+    --n-600: #d3c2d5;
+    --n-700: #e4d8e5;
+    --n-800: #f1eaf2;
+    --n-900: #fbf7fb;
 
-    /* Overlays float above the card plane, so they step up from it, not down.
-       The frame does the opposite: --chrome is below the canvas so the topbar
-       recedes and the content plane is the brightest thing on screen.
-       HackerRank values from Figma Hack-1: sidebar/frame #0d0d0d, cards and
-       overlays #252836, controls one step up at #353340. */
-    --elevated: #252836;
-    --chrome: #0d0d0d;
-    --control: #353340;
+    --elevated: #432047;
+    --chrome: #1d0b20;
+    --control: #54275a;
 
     --brand-fg: var(--brand-300);
+    --canvas-lavender: #442047;
+    --link-fg: #7db9e8;
 
-    /* Status ink is lifted for a dark background. These are also the only place
-       a hue other than the brand is allowed to appear. */
-    --ok-fg: #3ddc84;
-    --warn-fg: #fbbf24;
-    --err-fg: #ff6166;
-    --info-fg: #60a5fa;
-    --err-solid: #e5484d;
+    --ok-fg: #59c9a8;
+    --warn-fg: #f1c66b;
+    --err-fg: #ff9376;
+    --info-fg: #7db9e8;
+    --err-solid: #e96f4b;
 
-    --sh-rgb: 0 0 0;
-    --backdrop: rgb(0 0 0 / 0.72);
+    --sh-rgb: 29 11 32;
+    --backdrop: rgb(29 11 32 / 0.78);
 
-    /* See the --edge/--glow note in Tokens. The alphas are low by design: 0.05
-       of white on #171717 is roughly a 4-unit lift, which is a visible edge and
-       an invisible line. The glow's two layers do different jobs — a 1px white
-       rim that keeps the button's silhouette crisp against black, and a soft
-       brand halo below it that makes it read as the light source. */
-    --edge: inset 0 1px 0 rgb(255 255 255 / 0.05);
-    --glow: 0 0 0 1px rgb(255 255 255 / 0.06),
+    --edge: inset 0 1px 0 rgb(255 255 255 / 0.08);
+    --glow: 0 0 0 1px rgb(255 255 255 / 0.08),
       0 6px 22px -8px color-mix(in srgb, var(--brand-500) 65%, transparent);
 
-    /* The shimmer cannot be built from --n-100/--n-200 here. Those steps are 4
-       units apart in dark (see the ramp note), which is right for a hover but
-       leaves a skeleton visibly static — the sweep has to read as motion from
-       across the room. Widened to a 18-unit span that still sits below the card
-       plane, so a loading row reads as an absence rather than as content. */
-    --skeleton: linear-gradient(90deg, #1c1c1c 25%, #2e2e2e 50%, #1c1c1c 75%);
+    --skeleton: linear-gradient(90deg, #331735 25%, #54275a 50%, #331735 75%);
   }
 }
 
@@ -468,38 +459,40 @@
 :root.theme-dark {
   color-scheme: dark;
 
-  --n-0: #171717;
-  --n-50: #000000;
-  --n-100: #232323;
-  --n-200: #272727;
-  --n-300: #363636;
-  --n-400: #5e5e5e;
-  --n-500: #8f8f8f;
-  --n-600: #b4b4b4;
-  --n-700: #d4d4d4;
-  --n-800: #ebebeb;
-  --n-900: #f7f7f7;
+  --n-0: #2e1731;
+  --n-50: #1d0b20;
+  --n-100: #3a1c3d;
+  --n-200: #4a234c;
+  --n-300: #68466a;
+  --n-400: #947c97;
+  --n-500: #b8a3bb;
+  --n-600: #d3c2d5;
+  --n-700: #e4d8e5;
+  --n-800: #f1eaf2;
+  --n-900: #fbf7fb;
 
-  --elevated: #252836;
-  --chrome: #0d0d0d;
-  --control: #353340;
+  --elevated: #432047;
+  --chrome: #1d0b20;
+  --control: #54275a;
 
   --brand-fg: var(--brand-300);
+  --canvas-lavender: #442047;
+  --link-fg: #7db9e8;
 
-  --ok-fg: #3ddc84;
-  --warn-fg: #fbbf24;
-  --err-fg: #ff6166;
-  --info-fg: #60a5fa;
-  --err-solid: #e5484d;
+  --ok-fg: #59c9a8;
+  --warn-fg: #f1c66b;
+  --err-fg: #ff9376;
+  --info-fg: #7db9e8;
+  --err-solid: #e96f4b;
 
-  --sh-rgb: 0 0 0;
-  --backdrop: rgb(0 0 0 / 0.72);
+  --sh-rgb: 29 11 32;
+  --backdrop: rgb(29 11 32 / 0.78);
 
-  --edge: inset 0 1px 0 rgb(255 255 255 / 0.05);
-  --glow: 0 0 0 1px rgb(255 255 255 / 0.06),
+  --edge: inset 0 1px 0 rgb(255 255 255 / 0.08);
+  --glow: 0 0 0 1px rgb(255 255 255 / 0.08),
     0 6px 22px -8px color-mix(in srgb, var(--brand-500) 65%, transparent);
 
-  --skeleton: linear-gradient(90deg, #1c1c1c 25%, #2e2e2e 50%, #1c1c1c 75%);
+  --skeleton: linear-gradient(90deg, #331735 25%, #54275a 50%, #331735 75%);
 }
 
 :root.theme-light { color-scheme: light; }
@@ -688,7 +681,7 @@ table, .num, .mono, .kpi__value, .kbd { font-variant-numeric: tabular-nums; }
 .icon-btn--danger:hover { background: var(--err-bg); color: var(--err-fg); }
 
 .link {
-  color: var(--brand-fg); font-size: var(--fs-13); font-weight: 500;
+  color: var(--link-fg); font-size: var(--fs-13); font-weight: 500;
   border-radius: var(--r-sm);
 }
 .link:hover { text-decoration: underline; text-underline-offset: 2px; }
