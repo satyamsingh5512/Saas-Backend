@@ -17,17 +17,16 @@ const minimumJWTSecretLength = 32
 
 // Config holds all application configuration loaded from environment variables.
 type Config struct {
-	Port         string
-	DatabaseURL  string
-	DBHost       string
-	DBPort       string
-	DBUser       string
-	DBPassword   string
-	DBName       string
-	DBSSLMode    string
-	JWTSecret    string
-	JWTExpiryHrs string
-	Environment  string
+	Port        string
+	DatabaseURL string
+	DBHost      string
+	DBPort      string
+	DBUser      string
+	DBPassword  string
+	DBName      string
+	DBSSLMode   string
+	JWTSecret   string
+	Environment string
 
 	// CORSAllowedOrigins is an explicit allow-list of browser origins
 	// permitted to call the API cross-origin. Empty (the default) disables
@@ -57,6 +56,14 @@ type Config struct {
 	// ShutdownTimeout bounds how long in-flight requests may finish during a
 	// graceful shutdown before the process exits anyway.
 	ShutdownTimeout time.Duration
+
+	// Keepalive keeps free-tier hosting and databases from idling out (see
+	// internal/platform/keepalive). Enabled by default; set
+	// KEEPALIVE_ENABLED=false to silence it. The interval floors at 30s:
+	// anything more aggressive is load without benefit, since hosts measure
+	// idleness in minutes.
+	KeepaliveEnabled  bool
+	KeepaliveInterval time.Duration
 
 	// Token lifetimes for the refresh-token-rotation auth model
 	// (internal/identity). Parsed as Go durations (e.g. "15m", "720h").
@@ -107,10 +114,6 @@ type Config struct {
 	RedisAddr     string
 	RedisPassword string
 	RedisDB       int
-
-	// Kafka (Phase 10). Empty KafkaBrokers disables event publishing
-	// gracefully (falls back to a no-op publisher).
-	KafkaBrokers string
 }
 
 // Load reads configuration from a .env file (if present) and environment variables.
@@ -121,17 +124,16 @@ func Load() *Config {
 	}
 
 	return &Config{
-		Port:         getEnv("PORT", "8080"),
-		DatabaseURL:  strings.TrimSpace(os.Getenv("DATABASE_URL")),
-		DBHost:       getEnv("DB_HOST", "localhost"),
-		DBPort:       getEnv("DB_PORT", "5432"),
-		DBUser:       getEnv("DB_USER", "postgres"),
-		DBPassword:   getEnv("DB_PASSWORD", ""),
-		DBName:       getEnv("DB_NAME", "tenant_saas"),
-		DBSSLMode:    getEnv("DB_SSLMODE", "disable"),
-		JWTSecret:    strings.TrimSpace(os.Getenv("JWT_SECRET")),
-		JWTExpiryHrs: getEnv("JWT_EXPIRY_HOURS", "24"),
-		Environment:  getEnv("APP_ENV", "development"),
+		Port:        getEnv("PORT", "8080"),
+		DatabaseURL: strings.TrimSpace(os.Getenv("DATABASE_URL")),
+		DBHost:      getEnv("DB_HOST", "localhost"),
+		DBPort:      getEnv("DB_PORT", "5432"),
+		DBUser:      getEnv("DB_USER", "postgres"),
+		DBPassword:  getEnv("DB_PASSWORD", ""),
+		DBName:      getEnv("DB_NAME", "tenant_saas"),
+		DBSSLMode:   getEnv("DB_SSLMODE", "disable"),
+		JWTSecret:   strings.TrimSpace(os.Getenv("JWT_SECRET")),
+		Environment: getEnv("APP_ENV", "development"),
 
 		CORSAllowedOrigins: getEnvList("CORS_ALLOWED_ORIGINS"),
 		TenantBaseDomain:   strings.TrimSpace(os.Getenv("TENANT_BASE_DOMAIN")),
@@ -142,6 +144,9 @@ func Load() *Config {
 		DBConnMaxIdleTime: getEnvDuration("DB_CONN_MAX_IDLE_TIME", 10*time.Minute),
 
 		ShutdownTimeout: getEnvDuration("SHUTDOWN_TIMEOUT", 15*time.Second),
+
+		KeepaliveEnabled:  getEnvBool("KEEPALIVE_ENABLED", true),
+		KeepaliveInterval: max(getEnvDuration("KEEPALIVE_INTERVAL", time.Minute), 30*time.Second),
 
 		AccessTokenTTL:       getEnv("ACCESS_TOKEN_TTL", "15m"),
 		RefreshTokenTTL:      getEnv("REFRESH_TOKEN_TTL", "720h"), // 30 days
@@ -171,8 +176,6 @@ func Load() *Config {
 		RedisAddr:     getEnv("REDIS_ADDR", ""),
 		RedisPassword: getEnv("REDIS_PASSWORD", ""),
 		RedisDB:       getEnvInt("REDIS_DB", 0),
-
-		KafkaBrokers: getEnv("KAFKA_BROKERS", ""),
 	}
 }
 
@@ -230,29 +233,6 @@ func (c *Config) ValidateStorage() error {
 	}
 	if c.S3Region == "" {
 		return fmt.Errorf("S3_REGION must be set when STORAGE_DRIVER=s3")
-	}
-	return nil
-}
-
-// ValidateMail reports a half-configured mailer. Email delivery is optional --
-// an unset RESEND_API_KEY selects the no-op transport deliberately -- but a key
-// without a sender or a public base URL is a misconfiguration that would
-// otherwise surface as every invite and reset mail being rejected by Resend, or
-// delivered with a link that goes nowhere. Kept separate from Validate so it can
-// be reported as a startup warning in any environment rather than only blocking
-// production boot.
-func (c *Config) ValidateMail() error {
-	if c.ResendAPIKey == "" {
-		return nil
-	}
-	if c.MailFrom == "" {
-		return fmt.Errorf("MAIL_FROM must be set when RESEND_API_KEY is configured, on a domain verified in Resend")
-	}
-	if c.AppBaseURL == "" {
-		return fmt.Errorf("APP_BASE_URL must be set when RESEND_API_KEY is configured, so invite and reset links resolve")
-	}
-	if u, err := url.Parse(c.AppBaseURL); err != nil || u.Scheme == "" || u.Host == "" {
-		return fmt.Errorf("APP_BASE_URL must be an absolute URL, for example https://app.example.com")
 	}
 	return nil
 }
