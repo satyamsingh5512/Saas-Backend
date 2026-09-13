@@ -82,6 +82,8 @@
       <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 1.8"/></symbol>
       <symbol id="i-mail" viewBox="0 0 24 24"><rect x="3" y="5.5" width="18" height="13" rx="2"/><path d="m3.8 7 8.2 5.8L20.2 7"/></symbol>
       <symbol id="i-plug" viewBox="0 0 24 24"><path d="M9 3.5v5"/><path d="M15 3.5v5"/><path d="M6.5 8.5h11v3a5.5 5.5 0 0 1-11 0Z"/><path d="M12 17v3.5"/></symbol>
+      <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.4-4.4"/></symbol>
+      <symbol id="i-sidebar" viewBox="0 0 24 24"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/></symbol>
     </svg>
 
     <!-- ══════════════════════════════ Nav ══════════════════════════════ -->
@@ -126,96 +128,396 @@
           </h1>
 
           <p class="hero__sub rise rise--3">
-            Tenancy is the organization layer every B2B product needs before it
-            can build its own: authentication, database-driven roles, teams,
-            invitations, API keys, plan quotas and an append-only audit trail.
-            One Go binary, one Postgres database, many tenants - and a forgotten
-            <code class="code">WHERE tenant_id</code> can no longer leak a row.
+            <strong>Tenant SaaS Backend</strong> (architected by <strong>Satyam Singh</strong>) is a production-grade multi-tenant Go engine. Native PostgreSQL Row-Level Security (RLS) is enforced directly at the storage kernel — eliminating cross-tenant data leaks by mathematically isolating queries, API tokens, and audit trails.
           </p>
 
           <div class="hero__cta rise rise--4">
             <a class="btn btn--primary btn--lg" href="/app">
-              Start building
+              <span>Start building</span>
               <svg class="icon icon--sm" aria-hidden="true" focusable="false"><use href="#i-arrow-right"></use></svg>
             </a>
-            <a class="btn btn--secondary btn--lg" href="#lifecycle">See how isolation works</a>
+            <a class="btn btn--secondary btn--lg" href="#lifecycle"><span>See how RLS works</span></a>
           </div>
 
           <p class="hero__note rise rise--5">
-            Runs on one Postgres container. The dashboard ships inside the
-            binary - no frontend build, no static host, no CORS boundary.
+            Compiled into a single Go binary with embedded web dashboard. Zero Node runtime, zero build dependencies, and PostgreSQL-level cryptographic tenant boundaries.
           </p>
 
-          <!--
-            The workspace, drawn from the real design system rather than captured
-            as an image - so it cannot go stale against a redesign the way a PNG
-            does, and so it is the actual component styling rather than a
-            picture of it.
-
-            It carries real content on purpose. The earlier version of this
-            figure was rows of grey bars, which is the visual language of a
-            loading skeleton: it says "a UI goes here" instead of showing one,
-            and a reader cannot tell a placeholder from a product. Labels and
-            figures make it legible in the two seconds it gets.
-
-            aria-hidden because every fact in it is stated in the prose above; a
-            screen reader gaining a second, tabular copy of the same claims is
-            noise, not access.
-          -->
-          <div class="stage rise rise--6" aria-hidden="true">
-            <div class="stage__bar">
-              <span class="stage__dots"><i></i><i></i><i></i></span>
-              <span class="stage__path">acme.tenancy.app<em>/projects</em></span>
-              <span class="stage__kbd">⌘K</span>
-            </div>
-            <div class="stage__body">
-              <aside class="stage__side">
-                <span class="stage__org">
-                  <i class="stage__mark"></i>
-                  <b>Acme Inc</b>
-                  <em>pro plan</em>
+          <!-- Interactive Slack-like Workspace UI Mockup -->
+          <div
+            class="slack-mockup rise rise--6"
+            id="workspace-mockup"
+            data-sidebar="expanded"
+            data-active-view="rls"
+            data-active-team="acme"
+            role="region"
+            aria-label="Interactive Workspace Demonstration"
+          >
+            <!-- Window Titlebar -->
+            <div class="slack-mockup__bar">
+              <span class="slack-mockup__dots" aria-hidden="true"><i></i><i></i><i></i></span>
+              <button
+                type="button"
+                class="slack-mockup__toggle-btn"
+                id="ws-sidebar-toggle"
+                aria-label="Toggle workspace sidebar"
+                aria-expanded="true"
+              >
+                <svg class="icon icon--xs" aria-hidden="true" focusable="false"><use href="#i-sidebar"></use></svg>
+              </button>
+              <div class="slack-mockup__search">
+                <svg class="icon icon--xs" aria-hidden="true" focusable="false"><use href="#i-search"></use></svg>
+                <span>Search tenants, tables, RLS policies, audit logs...</span>
+                <span class="slack-mockup__kbd">⌘K</span>
+              </div>
+              <div class="slack-mockup__bar-right">
+                <span class="slack-mockup__status">
+                  <span class="slack-mockup__pulse-dot"></span>
+                  <span>PostgreSQL RLS · ENFORCED</span>
                 </span>
-                <span class="stage__nav stage__nav--on">Projects</span>
-                <span class="stage__nav">Teams</span>
-                <span class="stage__nav">Members</span>
-                <span class="stage__nav">API keys</span>
-                <span class="stage__nav">Audit log</span>
+                <span class="slack-mockup__user" title="Satyam Singh (Backend Architect)">SS</span>
+              </div>
+            </div>
+
+            <!-- Workspace Body -->
+            <div class="slack-mockup__body">
+              <!-- Left Mini Workspace Rail -->
+              <nav class="slack-mockup__rail" aria-label="Workspaces">
+                <span class="slack-mockup__rail-badge slack-mockup__rail-badge--active" title="Tenancy Production">T</span>
+                <span class="slack-mockup__rail-badge slack-mockup__rail-badge--muted" title="Staging Sandbox">S</span>
+                <span class="slack-mockup__rail-badge slack-mockup__rail-badge--muted" title="Add Workspace">+</span>
+              </nav>
+
+              <!-- Collapsible Sidebar Panel -->
+              <aside class="slack-mockup__sidebar" id="ws-sidebar" aria-label="Tenant navigation">
+                <!-- Org Card -->
+                <div class="slack-mockup__org">
+                  <span class="slack-mockup__org-mark">T</span>
+                  <div class="slack-mockup__org-text">
+                    <b class="slack-mockup__org-name">Tenancy Cloud</b>
+                    <span class="slack-mockup__org-plan">Enterprise Tenant</span>
+                  </div>
+                </div>
+
+                <!-- Simulated Teams / Tenants -->
+                <div class="slack-mockup__section-title">Simulated Tenants</div>
+                <button
+                  type="button"
+                  class="slack-mockup__channel is-active"
+                  data-team="acme"
+                  aria-pressed="true"
+                >
+                  <span class="slack-mockup__hash">#</span>
+                  <span class="slack-mockup__channel-name">acme-fintech</span>
+                  <span class="slack-mockup__badge">Active</span>
+                </button>
+                <button
+                  type="button"
+                  class="slack-mockup__channel"
+                  data-team="meridian"
+                  aria-pressed="false"
+                >
+                  <span class="slack-mockup__hash">#</span>
+                  <span class="slack-mockup__channel-name">meridian-health</span>
+                  <span class="slack-mockup__badge">Isolated</span>
+                </button>
+                <button
+                  type="button"
+                  class="slack-mockup__channel"
+                  data-team="hypergrowth"
+                  aria-pressed="false"
+                >
+                  <span class="slack-mockup__hash">#</span>
+                  <span class="slack-mockup__channel-name">hypergrowth-ai</span>
+                  <span class="slack-mockup__badge">Isolated</span>
+                </button>
+                <button
+                  type="button"
+                  class="slack-mockup__channel"
+                  data-team="staging"
+                  aria-pressed="false"
+                >
+                  <span class="slack-mockup__hash">#</span>
+                  <span class="slack-mockup__channel-name">staging-sandbox</span>
+                  <span class="slack-mockup__badge">Isolated</span>
+                </button>
+
+                <!-- Core Views Tablist -->
+                <div class="slack-mockup__section-title">Isolation &amp; Security</div>
+                <div class="slack-mockup__tablist" role="tablist" aria-label="Workspace Views">
+                  <button
+                    type="button"
+                    class="slack-mockup__tab is-active"
+                    id="ws-tab-rls"
+                    role="tab"
+                    aria-selected="true"
+                    aria-controls="ws-panel-rls"
+                    data-ws-tab="rls"
+                  >
+                    <svg class="icon icon--xs" aria-hidden="true" focusable="false"><use href="#i-shield"></use></svg>
+                    <span class="slack-mockup__tab-name">PostgreSQL RLS</span>
+                    <span class="slack-mockup__badge">Active</span>
+                  </button>
+                  <button
+                    type="button"
+                    class="slack-mockup__tab"
+                    id="ws-tab-keys"
+                    role="tab"
+                    aria-selected="false"
+                    aria-controls="ws-panel-keys"
+                    data-ws-tab="keys"
+                  >
+                    <svg class="icon icon--xs" aria-hidden="true" focusable="false"><use href="#i-key"></use></svg>
+                    <span class="slack-mockup__tab-name">API Keys</span>
+                    <span class="slack-mockup__badge">3 Keys</span>
+                  </button>
+                  <button
+                    type="button"
+                    class="slack-mockup__tab"
+                    id="ws-tab-audit"
+                    role="tab"
+                    aria-selected="false"
+                    aria-controls="ws-panel-audit"
+                    data-ws-tab="audit"
+                  >
+                    <svg class="icon icon--xs" aria-hidden="true" focusable="false"><use href="#i-activity"></use></svg>
+                    <span class="slack-mockup__tab-name">Audit Logs</span>
+                    <span class="slack-mockup__badge">Live</span>
+                  </button>
+                </div>
+
+                <!-- Guard Card Footer -->
+                <div class="slack-mockup__sidebar-foot">
+                  <div class="slack-mockup__guard-card">
+                    <div class="slack-mockup__guard-head">
+                      <span class="slack-mockup__guard-dot"></span>
+                      <span>Zero-Leak RLS Guard</span>
+                    </div>
+                    <p class="slack-mockup__guard-text">
+                      Kernel-enforced row filtering. Queries without tenant context yield zero rows.
+                    </p>
+                  </div>
+                </div>
               </aside>
 
-              <div class="stage__main">
-                <div class="stage__meters">
-                  <span class="meter-mini">
-                    <b>Seats</b>
-                    <em>12 <s>/ 50</s></em>
-                    <i class="meter-mini__track"><u class="meter-mini__fill meter-mini__fill--24"></u></i>
-                  </span>
-                  <span class="meter-mini">
-                    <b>Projects</b>
-                    <em>41 <s>/ 50</s></em>
-                    <i class="meter-mini__track"><u class="meter-mini__fill meter-mini__fill--82"></u></i>
-                  </span>
-                  <span class="meter-mini">
-                    <b>API keys</b>
-                    <em>3 <s>active</s></em>
-                    <i class="meter-mini__track"><u class="meter-mini__fill meter-mini__fill--18"></u></i>
-                  </span>
+              <!-- Main Content Canvas -->
+              <main class="slack-mockup__main">
+                <!-- Channel / Context Header -->
+                <div class="slack-mockup__channel-head">
+                  <div class="slack-mockup__channel-title-group">
+                    <div class="slack-mockup__channel-title">
+                      <span id="ws-header-title"># rls-policies</span>
+                    </div>
+                    <div class="slack-mockup__channel-topic" id="ws-header-sub">
+                      Context: <strong id="ws-active-tenant-label">acme-fintech</strong>
+                      (<code id="ws-active-tenant-uuid">018e69d7-83ab-7f12-b981-d13fb25a1e04</code>)
+                    </div>
+                  </div>
+                  <div class="slack-mockup__channel-tabs" role="tablist" aria-label="Quick view switcher">
+                    <button type="button" class="slack-mockup__h-tab is-active" data-ws-tab="rls" role="tab" aria-selected="true" aria-controls="ws-panel-rls">RLS Policies</button>
+                    <button type="button" class="slack-mockup__h-tab" data-ws-tab="keys" role="tab" aria-selected="false" aria-controls="ws-panel-keys">API Keys</button>
+                    <button type="button" class="slack-mockup__h-tab" data-ws-tab="audit" role="tab" aria-selected="false" aria-controls="ws-panel-audit">Audit Logs</button>
+                  </div>
                 </div>
 
-                <div class="stage__table">
-                  <span class="stage__tr stage__tr--head">
-                    <b>Project</b><b>Owner</b><b>Status</b>
-                  </span>
-                  <span class="stage__tr">
-                    <b>Website redesign</b><em>Ada Lovelace</em><i class="tag tag--ok">active</i>
-                  </span>
-                  <span class="stage__tr">
-                    <b>Mobile app</b><em>Grace Hopper</em><i class="tag tag--ok">active</i>
-                  </span>
-                  <span class="stage__tr">
-                    <b>Data platform</b><em>Alan Turing</em><i class="tag">archived</i>
-                  </span>
+                <!-- Panels Stack (CSS-Driven Visibility & Transform/Opacity) -->
+                <div class="slack-mockup__panels">
+                  <!-- View 1: PostgreSQL RLS Policies -->
+                  <section
+                    class="slack-mockup__panel"
+                    id="ws-panel-rls"
+                    role="tabpanel"
+                    aria-labelledby="ws-tab-rls"
+                  >
+                    <!-- KPI Metrics -->
+                    <div class="slack-mockup__kpi-grid">
+                      <div class="slack-mockup__kpi">
+                        <span class="slack-mockup__kpi-label">Policy Status</span>
+                        <span class="slack-mockup__kpi-val">FORCE RLS</span>
+                        <span class="slack-mockup__kpi-sub">Enforced on all tables</span>
+                      </div>
+                      <div class="slack-mockup__kpi">
+                        <span class="slack-mockup__kpi-label">Storage Engine</span>
+                        <span class="slack-mockup__kpi-val">PostgreSQL 16</span>
+                        <span class="slack-mockup__kpi-sub">C-kernel evaluation</span>
+                      </div>
+                      <div class="slack-mockup__kpi">
+                        <span class="slack-mockup__kpi-label">Cross-Tenant Risk</span>
+                        <span class="slack-mockup__kpi-val">0.00%</span>
+                        <span class="slack-mockup__kpi-sub">Mathematically isolated</span>
+                      </div>
+                    </div>
+
+                    <!-- SQL DDL Policy Card -->
+                    <div class="slack-mockup__card">
+                      <div class="slack-mockup__card-head">
+                        <span class="slack-mockup__card-title">
+                          <svg class="icon icon--xs" aria-hidden="true" focusable="false"><use href="#i-shield"></use></svg>
+                          migrations/000004_tenant_rls_policy.sql
+                        </span>
+                        <button
+                          type="button"
+                          class="slack-mockup__copy-btn"
+                          id="ws-copy-policy"
+                          aria-label="Copy policy SQL to clipboard"
+                        >
+                          <svg class="icon icon--xs" aria-hidden="true" focusable="false"><use href="#i-copy"></use></svg>
+                          <span>Copy SQL</span>
+                        </button>
+                      </div>
+                      <pre class="slack-mockup__code"><code id="ws-policy-code"><span class="token-cm">-- 1. Enforce strict tenant isolation on multi-tenant tables</span>
+<span class="token-kw">ALTER TABLE</span> public.projects <span class="token-kw">ENABLE ROW LEVEL SECURITY</span>;
+<span class="token-kw">ALTER TABLE</span> public.projects <span class="token-kw">FORCE ROW LEVEL SECURITY</span>;
+
+<span class="token-cm">-- 2. Restrictive security policy evaluated inside PostgreSQL kernel</span>
+<span class="token-kw">CREATE POLICY</span> tenant_isolation_policy <span class="token-kw">ON</span> public.projects
+  <span class="token-kw">AS RESTRICTIVE FOR ALL TO</span> tenant_app_user
+  <span class="token-kw">USING</span> (tenant_id = <span class="token-fn">NULLIF</span>(<span class="token-fn">current_setting</span>(<span class="token-str">'app.current_tenant_id'</span>, <span class="token-kw">true</span>), <span class="token-str">''</span>)::uuid)
+  <span class="token-kw">WITH CHECK</span> (tenant_id = <span class="token-fn">NULLIF</span>(<span class="token-fn">current_setting</span>(<span class="token-str">'app.current_tenant_id'</span>, <span class="token-kw">true</span>), <span class="token-str">''</span>)::uuid);</code></pre>
+                    </div>
+
+                    <!-- Simulated Query Ledger -->
+                    <div class="slack-mockup__card">
+                      <div class="slack-mockup__sandbox-head">
+                        Session: <code id="ws-session-query-context">SET LOCAL app.current_tenant_id = '018e69d7-83ab-7f12-b981-d13fb25a1e04';</code>
+                      </div>
+                      <table class="slack-mockup__table">
+                        <thead>
+                          <tr>
+                            <th>Project</th>
+                            <th>Owner</th>
+                            <th>Status</th>
+                            <th>Budget</th>
+                          </tr>
+                        </thead>
+                        <tbody id="ws-rls-table-body">
+                          <!-- Filled by JS safely via textContent -->
+                        </tbody>
+                      </table>
+                    </div>
+
+                    <div class="slack-mockup__callout">
+                      <svg class="icon" aria-hidden="true" focusable="false"><use href="#i-shield"></use></svg>
+                      <div>
+                        <strong>Kernel Enforcement Guarantee:</strong> 18,416 rows belonging to other tenants were suppressed at the PostgreSQL query plan level. No application <code class="code">WHERE</code> clause required in Go.
+                      </div>
+                    </div>
+                  </section>
+
+                  <!-- View 2: Scoped API Keys -->
+                  <section
+                    class="slack-mockup__panel"
+                    id="ws-panel-keys"
+                    role="tabpanel"
+                    aria-labelledby="ws-tab-keys"
+                  >
+                    <div class="slack-mockup__kpi-grid">
+                      <div class="slack-mockup__kpi">
+                        <span class="slack-mockup__kpi-label">Active Keys</span>
+                        <span class="slack-mockup__kpi-val">3 Provisioned</span>
+                        <span class="slack-mockup__kpi-sub">Scoped to tenant</span>
+                      </div>
+                      <div class="slack-mockup__kpi">
+                        <span class="slack-mockup__kpi-label">Hashing</span>
+                        <span class="slack-mockup__kpi-val">SHA-256</span>
+                        <span class="slack-mockup__kpi-sub">Plaintext never stored</span>
+                      </div>
+                      <div class="slack-mockup__kpi">
+                        <span class="slack-mockup__kpi-label">RBAC Check</span>
+                        <span class="slack-mockup__kpi-val">Strict</span>
+                        <span class="slack-mockup__kpi-sub">Database trigger bound</span>
+                      </div>
+                    </div>
+
+                    <div class="slack-mockup__card">
+                      <div class="slack-mockup__card-head">
+                        <span class="slack-mockup__card-title">
+                          <svg class="icon icon--xs" aria-hidden="true" focusable="false"><use href="#i-key"></use></svg>
+                          Tenant-Scoped API Tokens
+                        </span>
+                      </div>
+                      <table class="slack-mockup__table">
+                        <thead>
+                          <tr>
+                            <th>Token Name</th>
+                            <th>Key Prefix</th>
+                            <th>Assigned Scopes</th>
+                            <th>Rate Limit</th>
+                            <th>Status</th>
+                          </tr>
+                        </thead>
+                        <tbody id="ws-keys-table-body">
+                          <!-- Populated by JS -->
+                        </tbody>
+                      </table>
+                    </div>
+
+                    <div class="slack-mockup__callout">
+                      <svg class="icon" aria-hidden="true" focusable="false"><use href="#i-key"></use></svg>
+                      <div>
+                        <strong>Cryptographic Tenant Binding:</strong> Each API key is irreversibly hashed with SHA-256 and foreign-keyed directly to the tenant. Even with valid bearer credentials, cross-tenant impersonation fails at the database trigger.
+                      </div>
+                    </div>
+                  </section>
+
+                  <!-- View 3: Append-Only Audit Logs -->
+                  <section
+                    class="slack-mockup__panel"
+                    id="ws-panel-audit"
+                    role="tabpanel"
+                    aria-labelledby="ws-tab-audit"
+                  >
+                    <div class="slack-mockup__kpi-grid">
+                      <div class="slack-mockup__kpi">
+                        <span class="slack-mockup__kpi-label">Audit Policy</span>
+                        <span class="slack-mockup__kpi-val">Append-Only</span>
+                        <span class="slack-mockup__kpi-sub">No UPDATE or DELETE</span>
+                      </div>
+                      <div class="slack-mockup__kpi">
+                        <span class="slack-mockup__kpi-label">Integrity</span>
+                        <span class="slack-mockup__kpi-val">Chained</span>
+                        <span class="slack-mockup__kpi-sub">Tamper-evident sequence</span>
+                      </div>
+                      <div class="slack-mockup__kpi">
+                        <span class="slack-mockup__kpi-label">Commit Type</span>
+                        <span class="slack-mockup__kpi-val">Atomic</span>
+                        <span class="slack-mockup__kpi-sub">Same tx as user write</span>
+                      </div>
+                    </div>
+
+                    <div class="slack-mockup__card">
+                      <div class="slack-mockup__card-head">
+                        <span class="slack-mockup__card-title">
+                          <svg class="icon icon--xs" aria-hidden="true" focusable="false"><use href="#i-activity"></use></svg>
+                          Immutable Security Event Stream
+                        </span>
+                      </div>
+                      <table class="slack-mockup__table">
+                        <thead>
+                          <tr>
+                            <th>Event Action</th>
+                            <th>Target Resource</th>
+                            <th>Actor / Caller</th>
+                            <th>Policy Result</th>
+                            <th>Latency</th>
+                            <th>Timestamp</th>
+                          </tr>
+                        </thead>
+                        <tbody id="ws-audit-table-body">
+                          <!-- Populated by JS -->
+                        </tbody>
+                      </table>
+                    </div>
+
+                    <div class="slack-mockup__callout">
+                      <svg class="icon" aria-hidden="true" focusable="false"><use href="#i-shield"></use></svg>
+                      <div>
+                        <strong>Immutable Provenance:</strong> Database table privileges explicitly disallow <code class="code">UPDATE</code> and <code class="code">DELETE</code> on <code class="code">audit_events</code>. Every policy check and tenant context switch is recorded irrevocably.
+                      </div>
+                    </div>
+                  </section>
                 </div>
-              </div>
+              </main>
             </div>
           </div>
         </div>
