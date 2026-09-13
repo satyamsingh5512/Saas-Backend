@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"runtime"
 	"testing"
@@ -37,6 +38,13 @@ func loadRootEnv() {
 // skipped automatically if no database is reachable.
 func setupTestRouter(t *testing.T) (*gin.Engine, *gorm.DB, *config.Config) {
 	t.Helper()
+	requireDatabase := os.Getenv("REQUIRE_INTEGRATION_DB") != ""
+	databaseUnavailable := func(format string, args ...interface{}) {
+		if requireDatabase {
+			t.Fatalf(format, args...)
+		}
+		t.Skipf(format, args...)
+	}
 
 	loadRootEnv()
 	cfg := config.Load()
@@ -50,11 +58,11 @@ func setupTestRouter(t *testing.T) (*gin.Engine, *gorm.DB, *config.Config) {
 	migrationCfg.ApplyMigrationOverrides()
 	migrationDB, err := db.Connect(&migrationCfg)
 	if err != nil {
-		t.Skipf("skipping integration test, migration database not reachable: %v", err)
+		databaseUnavailable("migration database not reachable: %v", err)
 	}
 	migrationSQLDB, err := migrationDB.DB()
 	if err != nil || migrationSQLDB.Ping() != nil {
-		t.Skipf("skipping integration test, migration database not reachable")
+		databaseUnavailable("migration database not reachable")
 	}
 	if err := db.Migrate(migrationDB); err != nil {
 		t.Fatalf("failed to migrate test database: %v", err)
@@ -69,11 +77,11 @@ func setupTestRouter(t *testing.T) (*gin.Engine, *gorm.DB, *config.Config) {
 	// isolation actually holds.
 	database, err := db.Connect(cfg)
 	if err != nil {
-		t.Skipf("skipping integration test, database not reachable: %v", err)
+		databaseUnavailable("application database not reachable: %v", err)
 	}
 	sqlDB, err := database.DB()
 	if err != nil || sqlDB.Ping() != nil {
-		t.Skipf("skipping integration test, database not reachable")
+		databaseUnavailable("application database not reachable")
 	}
 
 	gin.SetMode(gin.TestMode)
