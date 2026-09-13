@@ -161,6 +161,7 @@ type UsageCounts struct {
 	Projects           int64
 	Teams              int64
 	PendingInvitations int64
+	StorageBytes       int64
 }
 
 // CountUsage gathers all four tenant totals in a single round trip.
@@ -187,7 +188,8 @@ func (r *Repository) CountUsage(ctx context.Context, now time.Time) (*UsageCount
 			    (SELECT count(*) FROM projects WHERE deleted_at IS NULL) AS projects,
 			    (SELECT count(*) FROM teams    WHERE deleted_at IS NULL) AS teams,
 			    (SELECT count(*) FROM invitations
-			      WHERE status = 'pending' AND expires_at > ?)           AS pending_invitations
+			      WHERE status = 'pending' AND expires_at > ?)           AS pending_invitations,
+			    (SELECT COALESCE(sum(size_bytes), 0) FROM files)        AS storage_bytes
 		`, now).Scan(&counts).Error
 	})
 	if err != nil {
