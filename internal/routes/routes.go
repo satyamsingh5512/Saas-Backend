@@ -65,10 +65,10 @@ func Setup(db *gorm.DB, cfg *config.Config) *gin.Engine {
 	router.Use(middleware.CORS(cfg.CORSAllowedOrigins))
 
 	// --- Module wiring (dependency injection root) ---
-	// Redis caching is optional: empty REDIS_ADDR (the default) or an
-	// unreachable instance yields a nil cache, and both consumers degrade to
+	// Redis caching is optional: an empty REDIS_URL (the default), invalid URL,
+	// or unreachable instance yields a nil cache, and both consumers degrade to
 	// querying Postgres on every check -- correct, just slower.
-	permissionCache := cache.New(cfg.RedisAddr, cfg.RedisPassword, cfg.RedisDB, appLogger)
+	permissionCache := cache.New(cfg.RedisURL, appLogger)
 
 	tenantRepo := tenancy.NewRepository(db)
 	tenantResolver := tenancy.NewResolver(tenantRepo, permissionCache, cfg.TenantBaseDomain)
