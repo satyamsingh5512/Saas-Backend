@@ -13,7 +13,8 @@ type ctxKey string
 const tenantCtxKey ctxKey = "tenancy.tenant"
 
 // Context carries the resolved tenant information for the lifetime of a
-// request. Attached by Middleware, read by handlers/services via FromContext.
+// request. Attached by Middleware (and the Gin bridge FromGinContext), read
+// by the credential-override path in this package.
 type Context struct {
 	TenantID uuid.UUID
 	Slug     string
@@ -24,10 +25,4 @@ type Context struct {
 // WithContext attaches tenant info to ctx.
 func WithContext(ctx context.Context, tc Context) context.Context {
 	return context.WithValue(ctx, tenantCtxKey, tc)
-}
-
-// FromContext retrieves tenant info previously attached by WithContext.
-func FromContext(ctx context.Context) (Context, bool) {
-	tc, ok := ctx.Value(tenantCtxKey).(Context)
-	return tc, ok
 }
