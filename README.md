@@ -152,7 +152,8 @@ internal/config/                 Environment configuration + production validati
 internal/db/                     Connection pool, startup ping, migration runner
 internal/middleware/             RequestID, slog logger, recovery, security headers, CORS, rate limit
 internal/platform/               Health / readiness / liveness endpoints
-internal/eventbus/               Domain event publisher interface (no-op until Kafka)
+internal/platform/cache/         Fail-open Redis adapter (tenant + permission caches)
+internal/platform/keepalive/     Free-tier keep-alive: DB ping + public /health ping
 internal/mailer/                 Transactional email: Resend transport, no-op fallback
 
 internal/tenancy/                Tenant entity, resolver, credential-based tenant override
@@ -640,12 +641,28 @@ still a 404, because there the client explicitly named a tenant.
 
 ## 16) Not Yet Implemented
 
-Interfaces exist and degrade to no-ops, so these can be added without touching
-call sites:
+- **Kafka event publishing.** There is deliberately no event bus in the tree:
+  every historical `events.Publish` call site was a no-op, so the interfaces,
+  the `NoopPublisher` wiring, and the `KAFKA_BROKERS` config were deleted
+  rather than carried. Reintroduce a publisher interface at the two service
+  constructors (`identity`, `invitations`) when the Kafka phase arrives.
 
-- **Kafka event publishing** (`internal/eventbus` is a no-op publisher).
-- **Redis caching** for permissions and tenant metadata (`nil` cache means every
-  check queries Postgres, which is correct but slower).
+Caching is implemented: `internal/platform/cache` is a fail-open Redis adapter
+behind the `tenancy.CacheReader` and `authz.PermissionCache` seams. Set
+`REDIS_ADDR=host:port` (plus `REDIS_PASSWORD` / `REDIS_DB` for managed tiers;
+any free tier works) and permission checks plus pre-auth tenant resolution are
+served from Redis with a 5-minute TTL. Leave it unset and every check queries
+Postgres, which is correct but slower. An unreachable Redis degrades to the
+same uncached behavior with one startup warning, so a sleeping free tier costs
+latency, never errors. Role assignment, revocation, permission edits and role
+deletion invalidate the affected holders; the TTL is only the backstop.
+
+A keep-alive loop (`internal/platform/keepalive`, on by default,
+`KEEPALIVE_INTERVAL=1m`) pings the database pool and `GET`s
+`APP_BASE_URL/health` every interval, which keeps free-tier hosting (Render
+idles after ~15 minutes without inbound traffic) and idle database pools from
+sleeping. It cannot prevent trial-expiry deletion or the 30-day free-Postgres
+expiry — only idle sleep.
 
 File uploads are implemented: `internal/files` stores bytes in a local directory
 or an S3-compatible bucket (`STORAGE_DRIVER=local|s3`), tracks ownership and
