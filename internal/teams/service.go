@@ -52,7 +52,7 @@ type CreateInput struct {
 // The audit/activity entries carry the caller's IP and user agent supplied by the
 // handler, so the returned team is recorded alongside who created it from where.
 func (s *Service) Create(ctx context.Context, entry audit.Entry, tenantID, actorID uuid.UUID, in CreateInput) (*Team, error) {
-	teamSlug, err := s.resolveSlug(in.Slug, in.Name)
+	teamSlug, err := slug.Resolve(in.Slug, in.Name)
 	if err != nil {
 		return nil, err
 	}
@@ -121,7 +121,7 @@ func (s *Service) Update(ctx context.Context, entry audit.Entry, teamID uuid.UUI
 		team.Name = name
 	}
 	if in.Slug != nil {
-		newSlug, err := s.resolveSlug(*in.Slug, team.Name)
+		newSlug, err := slug.Resolve(*in.Slug, team.Name)
 		if err != nil {
 			return nil, err
 		}
@@ -261,23 +261,6 @@ func (s *Service) ListMembers(ctx context.Context, teamID uuid.UUID, page, pageS
 
 // resolveSlug validates an explicitly supplied slug, or derives one from the
 // team name when none was given.
-func (s *Service) resolveSlug(explicit, name string) (string, error) {
-	if trimmed := strings.TrimSpace(explicit); trimmed != "" {
-		if !slug.Valid(trimmed) {
-			return "", apperror.New(apperror.CodeValidation,
-				"slug must be lowercase alphanumeric with single hyphens")
-		}
-		return trimmed, nil
-	}
-
-	derived := slug.Make(name)
-	if derived == "" {
-		return "", apperror.New(apperror.CodeValidation,
-			"could not derive a slug from the name; supply one explicitly")
-	}
-	return derived, nil
-}
-
 func (s *Service) recordTeamAction(ctx context.Context, entry audit.Entry, action, verb string, team *Team) {
 	if s.audit == nil {
 		return
