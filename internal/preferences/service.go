@@ -101,7 +101,7 @@ func (s *Service) Update(ctx context.Context, tenantID, userID uuid.UUID, in Upd
 
 // GetProfile assembles the caller's full self-service profile.
 func (s *Service) GetProfile(ctx context.Context, tenantID, userID uuid.UUID) (*Profile, error) {
-	user, err := s.repo.FindUser(ctx, userID)
+	record, err := s.repo.LoadProfile(ctx, userID)
 	if err != nil {
 		if errors.Is(err, ErrNotFound) {
 			return nil, apperror.New(apperror.CodeNotFound, "user not found")
@@ -109,19 +109,18 @@ func (s *Service) GetProfile(ctx context.Context, tenantID, userID uuid.UUID) (*
 		return nil, apperror.Wrap(apperror.CodeInternal, "failed to load profile", err)
 	}
 
-	prefs, err := s.Get(ctx, tenantID, userID)
-	if err != nil {
-		return nil, err
+	prefs := Defaults(tenantID, userID)
+	prefs.Timezone = record.PreferenceTimezone
+	prefs.Locale = record.PreferenceLocale
+	prefs.Theme = record.PreferenceTheme
+	prefs.EmailNotifications = record.PreferenceEmailNotify
+	if record.PreferenceUpdatedAt != nil {
+		prefs.UpdatedAt = *record.PreferenceUpdatedAt
 	}
 
-	org, err := s.repo.OrganizationSummary(ctx, tenantID)
-	if err != nil {
-		return nil, apperror.Wrap(apperror.CodeInternal, "failed to load organization", err)
-	}
-
-	roles, err := s.repo.RoleSlugs(ctx, userID)
-	if err != nil {
-		return nil, apperror.Wrap(apperror.CodeInternal, "failed to load roles", err)
+	var roles []string
+	if record.RoleSlugs != "" {
+		roles = strings.Split(record.RoleSlugs, ",")
 	}
 
 	permissions := []string{}
@@ -133,19 +132,24 @@ func (s *Service) GetProfile(ctx context.Context, tenantID, userID uuid.UUID) (*
 	}
 
 	return &Profile{
-		UserID:          user.ID,
+		UserID:          record.UserID,
 		TenantID:        tenantID,
-		Email:           user.Email,
-		FullName:        user.FullName,
-		AvatarURL:       user.AvatarURL,
-		Status:          user.Status,
-		EmailVerifiedAt: user.EmailVerifiedAt,
-		LastLoginAt:     user.LastLoginAt,
-		CreatedAt:       user.CreatedAt,
+		Email:           record.Email,
+		FullName:        record.FullName,
+		AvatarURL:       record.AvatarURL,
+		Status:          record.Status,
+		EmailVerifiedAt: record.EmailVerifiedAt,
+		LastLoginAt:     record.LastLoginAt,
+		CreatedAt:       record.CreatedAt,
 		Roles:           roles,
 		Permissions:     permissions,
 		Preferences:     prefs,
-		Organization:    *org,
+		Organization: Organization{
+			ID:       record.OrganizationID,
+			Name:     record.OrganizationName,
+			Slug:     record.OrganizationSlug,
+			PlanCode: record.OrganizationPlanCode,
+		},
 	}, nil
 }
 
