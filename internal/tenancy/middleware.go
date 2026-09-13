@@ -2,6 +2,7 @@ package tenancy
 
 import (
 	"context"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -102,7 +103,9 @@ func (r *Resolver) slugFromRequest(c *gin.Context) (slug string, fromHeader bool
 	}
 
 	host := c.Request.Host
-	if h, _, err := splitHostPort(host); err == nil {
+	// net.SplitHostPort also handles bracketed IPv6; a bare hostname simply
+	// misses and is used as-is.
+	if h, _, err := net.SplitHostPort(host); err == nil {
 		host = h
 	}
 	host = strings.ToLower(strings.Trim(strings.TrimSpace(host), "."))
@@ -122,13 +125,6 @@ func (r *Resolver) slugFromRequest(c *gin.Context) (slug string, fromHeader bool
 		return "", false
 	}
 	return label, false
-}
-
-func splitHostPort(host string) (string, string, error) {
-	if i := strings.LastIndex(host, ":"); i != -1 {
-		return host[:i], host[i+1:], nil
-	}
-	return host, "", nil
 }
 
 // Middleware resolves the tenant for every incoming request and attaches it
@@ -191,15 +187,6 @@ func FromGinContext(c *gin.Context) (Context, bool) {
 	}
 	tc, ok := v.(Context)
 	return tc, ok
-}
-
-// OverrideFromJWT is called by the identity auth middleware once a JWT has
-// been validated. It replaces whatever tenant the pre-auth resolver found
-// with the tenant ID embedded in the token, and returns an error if the
-// pre-auth resolution (if any occurred) disagreed with the token -- the
-// cross-tenant-replay defense described in the architecture doc.
-func OverrideFromJWT(c *gin.Context, jwtTenantID uuid.UUID) error {
-	return OverrideFromCredential(c, jwtTenantID)
 }
 
 // OverrideFromCredential establishes the tenant from an authenticated
