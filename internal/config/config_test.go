@@ -7,9 +7,15 @@ import (
 
 func TestValidateProductionAcceptsRenderDatabaseURL(t *testing.T) {
 	cfg := &Config{
-		Environment: "production",
-		JWTSecret:   strings.Repeat("s", minimumJWTSecretLength),
-		DatabaseURL: "postgresql://tenant:password@dpg-example:5432/tenant_saas",
+		Environment:    "production",
+		JWTSecret:      strings.Repeat("s", minimumJWTSecretLength),
+		DatabaseURL:    "postgresql://tenant:password@dpg-example:5432/tenant_saas",
+		StorageDriver:  "s3",
+		S3Region:       "us-east-1",
+		S3Bucket:       "tenant-files",
+		S3AccessKey:    "access",
+		S3SecretKey:    "secret",
+		MaxUploadBytes: 25 * 1024 * 1024,
 	}
 
 	if err := cfg.Validate(); err != nil {
@@ -34,15 +40,32 @@ func TestValidateProductionRejectsMissingSecretsAndLocalDatabase(t *testing.T) {
 
 func TestValidateAllowsCompleteSplitProductionDatabaseConfig(t *testing.T) {
 	cfg := &Config{
-		Environment: "production",
-		JWTSecret:   strings.Repeat("s", minimumJWTSecretLength),
-		DBHost:      "postgres.internal",
-		DBUser:      "tenant",
-		DBPassword:  "password",
-		DBName:      "tenant_saas",
+		Environment:    "production",
+		JWTSecret:      strings.Repeat("s", minimumJWTSecretLength),
+		DBHost:         "postgres.internal",
+		DBUser:         "tenant",
+		DBPassword:     "password",
+		DBName:         "tenant_saas",
+		StorageDriver:  "local",
+		StorageRoot:    "/var/lib/tenant-saas/uploads",
+		MaxUploadBytes: 25 * 1024 * 1024,
 	}
 
 	if err := cfg.Validate(); err != nil {
 		t.Fatalf("Validate() returned an unexpected error: %v", err)
+	}
+}
+
+func TestValidateStorageRequiresS3Credentials(t *testing.T) {
+	cfg := &Config{StorageDriver: "s3", S3Region: "us-east-1"}
+	if err := cfg.ValidateStorage(); err == nil {
+		t.Fatal("ValidateStorage() accepted incomplete S3 configuration")
+	}
+}
+
+func TestValidateStorageAllowsDevelopmentLocalDefaults(t *testing.T) {
+	cfg := &Config{Environment: "development", StorageDriver: "local", StorageRoot: "./data/uploads", MaxUploadBytes: 1024}
+	if err := cfg.ValidateStorage(); err != nil {
+		t.Fatalf("ValidateStorage() returned an unexpected error: %v", err)
 	}
 }
