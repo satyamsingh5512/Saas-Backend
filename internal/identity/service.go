@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/satym-in/tenant-saas-backend/internal/tenancy"
 	"github.com/satym-in/tenant-saas-backend/pkg/apperror"
+	"github.com/satym-in/tenant-saas-backend/pkg/dberr"
 	"github.com/satym-in/tenant-saas-backend/pkg/txscope"
 	"gorm.io/gorm"
 )
@@ -23,13 +24,6 @@ type RoleAssigner interface {
 	AssignSystemRoleTx(tx *gorm.DB, tenantID, userID uuid.UUID, roleSlug string) error
 	AssignSystemRole(ctx context.Context, tenantID, userID uuid.UUID, roleSlug string) error
 	PrimaryRoleSlug(ctx context.Context, userID uuid.UUID) (string, error)
-}
-
-// EventPublisher is the minimal surface identity needs from the eventing
-// layer (Kafka, wired up in the event-driven architecture phase). A no-op
-// implementation is safe to inject before Kafka exists.
-type EventPublisher interface {
-	Publish(ctx context.Context, topic string, key string, payload any) error
 }
 
 // Mailer is the minimal surface identity needs to deliver the tokens these
@@ -63,15 +57,14 @@ type Service struct {
 	repo       *Repository
 	tenantRepo *tenancy.Repository
 	roles      RoleAssigner
-	events     EventPublisher
 	mail       Mailer
 	cfg        Config
 	oauthCfg   OAuthConfig
 	db         *gorm.DB
 }
 
-func NewService(repo *Repository, tenantRepo *tenancy.Repository, roles RoleAssigner, events EventPublisher, mail Mailer, db *gorm.DB, cfg Config, oauthCfg OAuthConfig) *Service {
-	return &Service{repo: repo, tenantRepo: tenantRepo, roles: roles, events: events, mail: mail, db: db, cfg: cfg, oauthCfg: oauthCfg}
+func NewService(repo *Repository, tenantRepo *tenancy.Repository, roles RoleAssigner, mail Mailer, db *gorm.DB, cfg Config, oauthCfg OAuthConfig) *Service {
+	return &Service{repo: repo, tenantRepo: tenantRepo, roles: roles, mail: mail, db: db, cfg: cfg, oauthCfg: oauthCfg}
 }
 
 // ValidateCredentialState is called after JWT signature validation on every
@@ -140,7 +133,7 @@ func (s *Service) Register(ctx context.Context, req RegisterRequest) (*RegisterR
 		return nil
 	})
 	if err != nil {
-		code := classifyDBError(err)
+		code := dberr.Classify(err)
 		msg := "failed to create organization"
 		if code == apperror.CodeConflict {
 			msg = "tenant slug or email already exists"
@@ -151,15 +144,6 @@ func (s *Service) Register(ctx context.Context, req RegisterRequest) (*RegisterR
 	tokens, err := s.issueTokenPair(ctx, tenant.ID, user, "owner")
 	if err != nil {
 		return nil, err
-	}
-
-	if s.events != nil {
-		_ = s.events.Publish(ctx, "organization.created", tenant.ID.String(), map[string]any{
-			"tenant_id": tenant.ID, "tenant_slug": tenant.Slug,
-		})
-		_ = s.events.Publish(ctx, "user.created", user.ID.String(), map[string]any{
-			"user_id": user.ID, "tenant_id": tenant.ID, "email": user.Email,
-		})
 	}
 
 	return &RegisterResponse{
@@ -334,15 +318,6 @@ func (s *Service) RequestPasswordReset(ctx context.Context, req ForgotPasswordRe
 	if s.mail != nil {
 		s.mail.SendPasswordReset(ctx, user.Email, plain)
 	}
-
-	// The event carries the plaintext token for any future consumer (an
-	// alternative transport, or an audit-free delivery pipeline). It is
-	// deliberately absent from the audit log and application logs.
-	if s.events != nil {
-		_ = s.events.Publish(ctx, "auth.password_reset_requested", user.ID.String(), map[string]any{
-			"user_id": user.ID, "tenant_id": tenant.ID, "reset_token": plain,
-		})
-	}
 	return nil
 }
 
@@ -361,12 +336,6 @@ func (s *Service) ResetPassword(ctx context.Context, req ResetPasswordRequest) e
 			return apperror.New(apperror.CodeValidation, "invalid or expired reset token")
 		}
 		return apperror.Wrap(apperror.CodeInternal, "failed to reset password", err)
-	}
-
-	if s.events != nil {
-		_ = s.events.Publish(ctx, "auth.password_changed", vt.UserID.String(), map[string]any{
-			"user_id": vt.UserID, "tenant_id": vt.TenantID,
-		})
 	}
 	return nil
 }
@@ -401,12 +370,6 @@ func (s *Service) RequestEmailVerification(ctx context.Context, tenantID, userID
 	if s.mail != nil {
 		s.mail.SendEmailVerification(ctx, user.Email, plain)
 	}
-
-	if s.events != nil {
-		_ = s.events.Publish(ctx, "auth.email_verification_requested", userID.String(), map[string]any{
-			"user_id": userID, "tenant_id": tenantID, "verification_token": plain,
-		})
-	}
 	return nil
 }
 
@@ -421,12 +384,6 @@ func (s *Service) VerifyEmail(ctx context.Context, req VerifyEmailRequest) error
 			return apperror.New(apperror.CodeValidation, "invalid or expired verification token")
 		}
 		return apperror.Wrap(apperror.CodeInternal, "failed to verify email", err)
-	}
-
-	if s.events != nil {
-		_ = s.events.Publish(ctx, "user.email_verified", vt.UserID.String(), map[string]any{
-			"user_id": vt.UserID, "tenant_id": vt.TenantID,
-		})
 	}
 	return nil
 }
