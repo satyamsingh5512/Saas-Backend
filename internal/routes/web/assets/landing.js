@@ -601,6 +601,239 @@
     }
   }
 
+  /* ───────────────────── Interactive Workspace Mockup ─────────────────── */
+
+  function wireWorkspaceMockup() {
+    const mockup = $("#workspace-mockup");
+    if (!mockup) return;
+
+    const TEAMS = {
+      acme: {
+        label: "acme-fintech",
+        uuid: "018e69d7-83ab-7f12-b981-d13fb25a1e04",
+        rows: [
+          { name: "Core Banking Integration", owner: "Satyam Singh", status: "active", budget: "$64,000" },
+          { name: "PCI-DSS Vault Proxy", owner: "Elena Rostova", status: "active", budget: "$32,500" },
+          { name: "Real-time Fraud Webhooks", owner: "Marcus Vance", status: "deploying", budget: "$18,000" },
+        ],
+        keys: [
+          { name: "Production Ingestion Worker", prefix: "ten_live_9a8f...c421", scopes: "projects:read, projects:write", rate: "10,000/min", status: "Active" },
+          { name: "CI/CD Deployment Bot", prefix: "ten_live_4b7c...189a", scopes: "projects:read, migrations:check", rate: "2,000/min", status: "Active" },
+          { name: "Legacy Synchronizer", prefix: "ten_test_1c3d...77b4", scopes: "projects:read", rate: "500/min", status: "Revoked" },
+        ],
+        audit: [
+          { action: "policy.evaluated", target: "projects.select", actor: "satyam@tenancy.dev", result: "ALLOWED (3 rows)", latency: "0.3ms", time: "Just now" },
+          { action: "tenant.context_set", target: "session.variable", actor: "Go/pgxpool", result: "SET LOCAL OK", latency: "0.1ms", time: "38s ago" },
+          { action: "api_key.authenticated", target: "api_keys.lookup", actor: "ten_live_9a8f...", result: "SHA-256 MATCH", latency: "0.4ms", time: "2m ago" },
+          { action: "cross_tenant.blocked", target: "projects.select", actor: "foreign_probe", result: "DENIED BY RLS (0 rows)", latency: "0.2ms", time: "6m ago" },
+        ],
+      },
+      meridian: {
+        label: "meridian-health",
+        uuid: "018e69d8-94bc-7e23-a192-e24fc36b2f15",
+        rows: [
+          { name: "EHR Patient Data Relay", owner: "Dr. Sarah Chen", status: "active", budget: "$85,000" },
+          { name: "Telehealth WebRTC Proxy", owner: "James Miller", status: "active", budget: "$42,000" },
+        ],
+        keys: [
+          { name: "HIPAA Audit Collector", prefix: "ten_live_3f11...88ab", scopes: "audit:read, audit:write", rate: "5,000/min", status: "Active" },
+          { name: "Provider Portal API", prefix: "ten_live_7e90...41c2", scopes: "patients:read", rate: "3,000/min", status: "Active" },
+        ],
+        audit: [
+          { action: "policy.evaluated", target: "patients.select", actor: "sarah@meridian.io", result: "ALLOWED (2 rows)", latency: "0.2ms", time: "1m ago" },
+          { action: "tenant.context_set", target: "session.variable", actor: "Go/pgxpool", result: "SET LOCAL OK", latency: "0.1ms", time: "2m ago" },
+        ],
+      },
+      hypergrowth: {
+        label: "hypergrowth-ai",
+        uuid: "018e69d9-a5cd-7f34-b203-f35ad47c3e26",
+        rows: [
+          { name: "LLM Inference Gateway", owner: "Alex Rivera", status: "active", budget: "$120,000" },
+          { name: "Vector Index Partition", owner: "Devin Zhao", status: "active", budget: "$54,000" },
+          { name: "Embeddings Cache Pool", owner: "Priya Patel", status: "active", budget: "$29,000" },
+        ],
+        keys: [
+          { name: "Cluster Model Dispatcher", prefix: "ten_live_6c44...99df", scopes: "models:*, inference:run", rate: "25,000/min", status: "Active" },
+        ],
+        audit: [
+          { action: "policy.evaluated", target: "models.select", actor: "alex@hypergrowth.ai", result: "ALLOWED (3 rows)", latency: "0.4ms", time: "45s ago" },
+        ],
+      },
+      staging: {
+        label: "staging-sandbox",
+        uuid: "018e69da-b6de-7045-c314-046be58d4f37",
+        rows: [
+          { name: "Chaos Injection Test #4", owner: "QA Automation", status: "testing", budget: "$5,000" },
+          { name: "Schema Migration Check", owner: "Satyam Singh", status: "active", budget: "$8,200" },
+        ],
+        keys: [
+          { name: "Ephemeral Test Runner", prefix: "ten_test_0c49...99a2", scopes: "projects:*", rate: "1,000/min", status: "Active" },
+        ],
+        audit: [
+          { action: "cross_tenant.blocked", target: "projects.delete", actor: "chaos_runner", result: "DENIED BY RLS (0 rows)", latency: "0.2ms", time: "10s ago" },
+        ],
+      },
+    };
+
+    let activeTeam = "acme";
+    let activeView = "rls";
+
+    const sidebarToggle = $("#ws-sidebar-toggle");
+    const activeTenantLabel = $("#ws-active-tenant-label");
+    const activeTenantUuid = $("#ws-active-tenant-uuid");
+    const sessionQueryContext = $("#ws-session-query-context");
+    const rlsTableBody = $("#ws-rls-table-body");
+    const keysTableBody = $("#ws-keys-table-body");
+    const auditTableBody = $("#ws-audit-table-body");
+    const headerTitle = $("#ws-header-title");
+    const copyPolicyBtn = $("#ws-copy-policy");
+
+    if (sidebarToggle) {
+      sidebarToggle.addEventListener("click", () => {
+        const isCollapsed = mockup.dataset.sidebar === "collapsed";
+        const nextState = isCollapsed ? "expanded" : "collapsed";
+        mockup.dataset.sidebar = nextState;
+        sidebarToggle.setAttribute("aria-expanded", String(isCollapsed));
+      });
+    }
+
+    const selectView = (viewKey) => {
+      activeView = viewKey;
+      mockup.dataset.activeView = viewKey;
+
+      $$("[data-ws-tab]").forEach((tab) => {
+        const matches = tab.dataset.wsTab === viewKey;
+        tab.setAttribute("aria-selected", String(matches));
+        tab.classList.toggle("is-active", matches);
+      });
+
+      if (headerTitle) {
+        if (viewKey === "rls") headerTitle.textContent = "# rls-policies";
+        else if (viewKey === "keys") headerTitle.textContent = "# api-tokens";
+        else if (viewKey === "audit") headerTitle.textContent = "# audit-logs";
+      }
+    };
+
+    $$("[data-ws-tab]").forEach((tab) => {
+      tab.addEventListener("click", () => selectView(tab.dataset.wsTab));
+      tab.addEventListener("keydown", (e) => {
+        const tabs = $$(".slack-mockup__tab");
+        const idx = tabs.indexOf(tab);
+        if (idx === -1) return;
+        const delta =
+          e.key === "ArrowDown" || e.key === "ArrowRight"
+            ? 1
+            : e.key === "ArrowUp" || e.key === "ArrowLeft"
+              ? -1
+              : 0;
+        if (!delta) return;
+        e.preventDefault();
+        const next = tabs[(idx + delta + tabs.length) % tabs.length];
+        next.focus();
+        selectView(next.dataset.wsTab);
+      });
+    });
+
+    const renderTeamData = (teamKey) => {
+      const data = TEAMS[teamKey];
+      if (!data) return;
+
+      if (activeTenantLabel) activeTenantLabel.textContent = data.label;
+      if (activeTenantUuid) activeTenantUuid.textContent = data.uuid;
+      if (sessionQueryContext) {
+        sessionQueryContext.textContent = `SET LOCAL app.current_tenant_id = '${data.uuid}';`;
+      }
+
+      if (rlsTableBody) {
+        clear(rlsTableBody);
+        data.rows.forEach((row) => {
+          const statusClass = row.status === "active" ? "tag tag--ok" : "tag";
+          const tr = el(
+            "tr",
+            {},
+            el("td", {}, el("strong", { text: row.name })),
+            el("td", { text: row.owner }),
+            el("td", {}, el("span", { class: statusClass, text: row.status })),
+            el("td", {}, el("code", { text: row.budget }))
+          );
+          rlsTableBody.append(tr);
+        });
+      }
+
+      if (keysTableBody) {
+        clear(keysTableBody);
+        data.keys.forEach((key) => {
+          const statusClass = key.status === "Active" ? "tag tag--ok" : "tag";
+          const tr = el(
+            "tr",
+            {},
+            el("td", {}, el("strong", { text: key.name })),
+            el("td", {}, el("code", { text: key.prefix })),
+            el("td", { text: key.scopes }),
+            el("td", { text: key.rate }),
+            el("td", {}, el("span", { class: statusClass, text: key.status }))
+          );
+          keysTableBody.append(tr);
+        });
+      }
+
+      if (auditTableBody) {
+        clear(auditTableBody);
+        data.audit.forEach((event) => {
+          const isBlocked = event.action.includes("blocked");
+          const statusClass = isBlocked ? "tag tag--err" : "tag tag--ok";
+          const tr = el(
+            "tr",
+            {},
+            el("td", {}, el("code", { text: event.action })),
+            el("td", { text: event.target }),
+            el("td", { text: event.actor }),
+            el("td", {}, el("span", { class: statusClass, text: event.result })),
+            el("td", { text: event.latency }),
+            el("td", { text: event.time })
+          );
+          auditTableBody.append(tr);
+        });
+      }
+    };
+
+    $$("[data-team]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const teamKey = btn.dataset.team;
+        if (!teamKey) return;
+        activeTeam = teamKey;
+        mockup.dataset.activeTeam = teamKey;
+
+        $$("[data-team]").forEach((b) => {
+          const isCurrent = b === btn;
+          b.setAttribute("aria-pressed", String(isCurrent));
+          b.classList.toggle("is-active", isCurrent);
+        });
+
+        renderTeamData(teamKey);
+      });
+    });
+
+    if (copyPolicyBtn) {
+      copyPolicyBtn.addEventListener("click", async () => {
+        const code = $("#ws-policy-code");
+        if (!code || !navigator.clipboard) return;
+        try {
+          await navigator.clipboard.writeText(code.textContent);
+          copyPolicyBtn.setAttribute("aria-label", "Copied policy SQL");
+          clear(copyPolicyBtn).append(icon("i-check", "icon icon--xs"), el("span", { text: "Copied" }));
+          setTimeout(() => {
+            copyPolicyBtn.setAttribute("aria-label", "Copy policy SQL");
+            clear(copyPolicyBtn).append(icon("i-copy", "icon icon--xs"), el("span", { text: "Copy SQL" }));
+          }, 1400);
+        } catch (_) {}
+      });
+    }
+
+    renderTeamData(activeTeam);
+    selectView(activeView);
+  }
+
   /* ──────────────────────────────── Boot ─────────────────────────────── */
 
   function boot() {
@@ -609,6 +842,7 @@
      * reveals everything synchronously, and would look for demoAutoplay before
      * wireDemo had published it. */
     wireDemo();
+    wireWorkspaceMockup();
     wireReveals();
     wireCode();
     wireSpotlight();
