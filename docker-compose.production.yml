@@ -29,7 +29,6 @@ services:
       MIGRATE_DB_USER: postgres
       MIGRATE_DB_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD for the migration role}
       JWT_SECRET: ${JWT_SECRET:?Set a long random JWT_SECRET in the deployment environment}
-      JWT_EXPIRY_HOURS: ${JWT_EXPIRY_HOURS:-24}
 
   postgres:
     image: postgres:16-alpine
