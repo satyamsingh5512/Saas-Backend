@@ -4,7 +4,7 @@
 //
 // Both consumers were built cache-optional: a nil cache always queries
 // Postgres, which is correct but slower. This package fills those seams when
-// REDIS_ADDR is configured, and gets out of the way when it is not.
+// REDIS_URL is configured, and gets out of the way when it is not.
 //
 // Failure policy is fail-open everywhere. A cache is a performance
 // optimization, never a correctness dependency: a Redis error on read is a
@@ -19,6 +19,7 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -65,34 +66,40 @@ var (
 	// without importing authz, keeping this package a leaf.
 )
 
-// New connects to Redis and returns a usable Cache, or nil when caching
-// should stay off: empty addr (the default, per config), or unreachable
-// Redis. Unreachable is a warning, not a fatal -- the services run
-// uncached, which is the same behavior as before this package existed.
-func New(addr, password string, db int, logger *slog.Logger) *Cache {
-	if addr == "" {
+// New connects to the configured Redis URL and returns a usable Cache, or nil
+// when caching should stay off: an empty URL (the default), malformed URL, or
+// unreachable Redis. All failures are warnings, not fatal, so services retain
+// their correct historic uncached behavior.
+func New(redisURL string, logger *slog.Logger) *Cache {
+	redisURL = strings.TrimSpace(redisURL)
+	if redisURL == "" {
 		return nil
 	}
-	client := redis.NewClient(&redis.Options{
-		Addr:     addr,
-		Password: password,
-		DB:       db,
-		// Free tiers idle-timeout aggressively. Short dial timeouts keep a
-		// sleeping instance from stalling requests; the pool re-dials on
-		// next use and reads fail open to Postgres meanwhile.
-		DialTimeout:  3 * time.Second,
-		ReadTimeout:  2 * time.Second,
-		WriteTimeout: 2 * time.Second,
-		PoolSize:     10,
-	})
+
+	options, err := redis.ParseURL(redisURL)
+	if err != nil {
+		// Do not log the parsing error: URL errors can include the unredacted
+		// connection string, which may contain a password.
+		logger.Warn("redis URL invalid, running without cache")
+		return nil
+	}
+	// Free tiers idle-timeout aggressively. Short dial timeouts keep a sleeping
+	// instance from stalling requests; the pool re-dials on next use and reads
+	// fail open to Postgres meanwhile.
+	options.DialTimeout = 3 * time.Second
+	options.ReadTimeout = 2 * time.Second
+	options.WriteTimeout = 2 * time.Second
+	options.PoolSize = 10
+
+	client := redis.NewClient(options)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := client.Ping(ctx).Err(); err != nil {
-		logger.Warn("redis unavailable, running without cache", "addr", addr, "error", err)
+		logger.Warn("redis unavailable, running without cache", "addr", options.Addr, "error", err)
 		_ = client.Close()
 		return nil
 	}
-	logger.Info("redis cache enabled", "addr", addr)
+	logger.Info("redis cache enabled", "addr", options.Addr)
 	return &Cache{client: client}
 }
 
