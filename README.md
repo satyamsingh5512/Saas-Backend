@@ -16,12 +16,13 @@ every B2B SaaS needs before it can build its actual product.
 |---|---|
 | Tenant onboarding | Create an organization plus its first owner atomically |
 | Authentication | Password login, refresh-token rotation with theft detection, password reset, email verification, GitHub OAuth |
-| Authorization | Database-driven RBAC: 5 seeded roles, 21 permissions, editable per tenant |
+| Authorization | Database-driven RBAC: 5 seeded roles, 22 permissions, editable per tenant |
 | Tenant isolation | PostgreSQL Row-Level Security on every tenant-scoped table |
 | Teams & projects | Grouping, membership, archival, soft delete |
+| Files | Tenant-scoped attachments (local or S3) with plan storage quotas |
 | Invitations | Single-use hashed invite tokens redeemable without a prior account |
 | API keys | Scoped machine credentials, hashed at rest, revocable |
-| Billing | Plan catalog, per-tenant subscription, enforced seat/project quotas |
+| Billing | Plan catalog, per-tenant subscription, enforced seat/project/storage quotas |
 | Notifications | Per-user in-app feed with unread tracking, plus transactional email via Resend |
 | Audit & activity | Append-only compliance log plus a product-facing timeline |
 | Self-service | Profile, display preferences, password rotation |
@@ -161,7 +162,8 @@ internal/teams/                  Teams and team membership
 internal/projects/               Projects, membership, archival, plan quota check
 internal/invitations/            Hashed invite tokens, preview, atomic accept
 internal/apikeys/                Scoped machine credentials + authentication middleware
-internal/billing/                Plan catalog, subscriptions, seat/project quota enforcement
+internal/billing/                Plan catalog, subscriptions, seat/project/storage quota enforcement
+internal/files/                  Tenant-scoped file metadata + local/S3 object storage
 internal/notifications/          Per-user in-app notifications
 internal/audit/                  Append-only audit log + activity feed
 internal/preferences/            Self-service profile, preferences, password change
@@ -230,6 +232,10 @@ Permission in brackets. API keys authorize from their scopes instead of roles.
 | PATCH | `/api/v1/projects/:projectID` | `project:manage` |
 | DELETE | `/api/v1/projects/:projectID` | `project:delete` |
 | GET/POST/DELETE | `/api/v1/projects/:projectID/members…` | `project:view` / `project:manage` |
+| GET | `/api/v1/files` | `file:view` |
+| POST | `/api/v1/files` | `file:upload` |
+| GET | `/api/v1/files/:fileID`, `/:fileID/download` | `file:view` |
+| DELETE | `/api/v1/files/:fileID` | `file:delete` |
 | GET/POST | `/api/v1/invitations` | `member:view` / `member:invite` |
 | DELETE | `/api/v1/invitations/:inviteID` | `member:invite` |
 | GET | `/api/v1/api-keys` | `apikey:view` |
@@ -271,9 +277,9 @@ several flows match on `owner` specifically.
 |---|---|---|
 | Owner | 0 | Everything, including `org:manage` |
 | Admin | 10 | Everything except `org:manage` |
-| Manager | 20 | Teams, projects, invites, no billing or role management |
-| Member | 30 | View, create projects, upload files |
-| Guest | 40 | Read-only |
+| Manager | 20 | Teams, projects, invites, files (view/upload/delete), no billing or role management |
+| Member | 30 | View, create projects, view/upload files |
+| Guest | 40 | Read-only, including file view |
 
 Permission checks resolve from the database on every request, so a role edit
 takes effect immediately without a redeploy.
@@ -333,6 +339,7 @@ is why no flow treats mail as a precondition.
 
 ```bash
 make build              make test               make test-verbose
+make test-integration
 make vet                make fmt                make tidy
 make db-up              make db-down
 make migrate-up         make migrate-down       make migrate-version
@@ -345,6 +352,11 @@ usable without Docker. With a database available, the integration suite in
 `internal/routes/` exercises the real router against real RLS policies:
 cross-tenant reads, plan quota rejection, invite redemption, API key scope
 enforcement, and audit capture.
+
+`make test-integration` sets `REQUIRE_INTEGRATION_DB=1` and fails instead of
+skipping when PostgreSQL is unavailable. Use it in CI and before calling a
+deployment verified; the ordinary `make test` command is intentionally safe to
+run on a laptop without Docker.
 
 When changing the dashboard JavaScript, run `node --check
 internal/routes/web/assets/app.js`; it is not covered by `go vet`. The same
@@ -413,7 +425,7 @@ can pass against a stale copy.
 
 Two documents ship inside the binary, with no separate frontend build, static
 host, or CORS boundary. `/` is the landing page; `/app` is the dashboard, which
-covers overview and quota usage, projects, teams, members and invitations, roles
+covers overview and quota usage, projects, teams, files, members and invitations, roles
 and permissions, API keys, billing, the audit log, and account settings.
 
 The landing page has no design system of its own — it loads `app.css` for the
@@ -497,8 +509,17 @@ docker run --rm -p 8080:8080 \
 For an all-container preview deployment on a private VM:
 
 ```bash
+# DB_PASSWORD is the restricted app_user password; POSTGRES_PASSWORD is the
+# separate bootstrap/migration password used only by the database container.
 docker compose -f docker-compose.production.yml up -d --build
 ```
+
+The production Compose file creates `app_user` on a fresh PostgreSQL volume,
+runs migrations with the separate `postgres` credential, and serves requests
+through `app_user` with `NOBYPASSRLS`. If an existing volume predates this
+layout, run `scripts/provision_app_role.sql` once with the migration credential
+before switching the application to `DB_USER=app_user`. Do not reuse the
+bootstrap password for application traffic.
 
 Do not expose PostgreSQL publicly. Put the application behind a TLS-terminating
 proxy, set `DB_SSLMODE=require` for remote databases, and keep `JWT_SECRET` in a
@@ -625,5 +646,8 @@ call sites:
 - **Kafka event publishing** (`internal/eventbus` is a no-op publisher).
 - **Redis caching** for permissions and tenant metadata (`nil` cache means every
   check queries Postgres, which is correct but slower).
-- **File uploads.** The `file:upload` and `file:delete` permissions are still
-  seeded, but no storage backend exists and none is configured.
+
+File uploads are implemented: `internal/files` stores bytes in a local directory
+or an S3-compatible bucket (`STORAGE_DRIVER=local|s3`), tracks ownership and
+quotas in the `files` table (migration `000015`), and enforces the plan's
+`max_storage_mb` in `billing.Service.CheckStorageQuota`.
