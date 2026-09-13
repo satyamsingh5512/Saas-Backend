@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/satym-in/tenant-saas-backend/pkg/apperror"
+	"github.com/satym-in/tenant-saas-backend/pkg/slug"
 	"github.com/satym-in/tenant-saas-backend/pkg/txscope"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -134,7 +135,7 @@ func (s *Service) ListPermissionCatalog(ctx context.Context) ([]Permission, erro
 func (s *Service) CreateRole(ctx context.Context, tenantID, actorID uuid.UUID, name, description string, permissionCodes []string) (*Role, error) {
 	codes := uniquePermissionCodes(permissionCodes)
 	role := &Role{
-		ID: uuid.New(), TenantID: tenantID, Name: name, Slug: slugify(name),
+		ID: uuid.New(), TenantID: tenantID, Name: name, Slug: slug.Make(name),
 		Description: description, IsSystem: false, Rank: 100,
 	}
 
@@ -316,6 +317,11 @@ func (s *Service) UpdateRolePermissions(
 ) (*RolePermissions, error) {
 	codes := uniquePermissionCodes(permissionCodes)
 	var role Role
+	// Holder IDs are read before the mutation so invalidation below reaches
+	// every affected user even though the write itself is what changes their
+	// effective permissions. A lookup failure yields no IDs and invalidation
+	// degrades to TTL expiry rather than failing the mutation.
+	holders, _ := s.repo.UserIDsWithRole(ctx, roleID)
 	err := s.repo.withTenantTx(ctx, func(tx *gorm.DB) error {
 		actor, err := s.repo.actorAccessTx(tx, actorID)
 		if err != nil {
@@ -360,13 +366,21 @@ func (s *Service) UpdateRolePermissions(
 	if err != nil {
 		return nil, roleMutationError("failed to update role permissions", err)
 	}
+	// holdersErr != nil means holders is empty: invalidation degrades to TTL
+	// expiry rather than failing the mutation.
+	for _, userID := range holders {
+		s.InvalidateCache(ctx, tenantID, userID)
+	}
 	sort.Strings(codes)
 	return &RolePermissions{RoleID: role.ID, PermissionCodes: codes, Revision: roleRevision(role.UpdatedAt)}, nil
 }
 
 // DeleteRole removes only a lower-ranked custom role. The role row is locked
-// while the actor's current authority is checked.
+// while the actor's current authority is checked. Holders are invalidated
+// afterwards: deleting a role removes its permissions from every holder's
+// effective set, so their cached sets must go too.
 func (s *Service) DeleteRole(ctx context.Context, actorID, roleID uuid.UUID) error {
+	holders, _ := s.repo.UserIDsWithRole(ctx, roleID) // see UpdateRolePermissions: failure degrades to TTL expiry
 	err := s.repo.withTenantTx(ctx, func(tx *gorm.DB) error {
 		actor, err := s.repo.actorAccessTx(tx, actorID)
 		if err != nil {
@@ -390,6 +404,11 @@ func (s *Service) DeleteRole(ctx context.Context, actorID, roleID uuid.UUID) err
 	})
 	if err != nil {
 		return roleMutationError("failed to delete role", err)
+	}
+	if tenantID, ok := txscope.TenantIDFromContext(ctx); ok {
+		for _, userID := range holders {
+			s.InvalidateCache(ctx, tenantID, userID)
+		}
 	}
 	return nil
 }
@@ -491,27 +510,4 @@ func (s *Service) RevokeRole(ctx context.Context, tenantID, actorID, userID, rol
 	}
 	s.InvalidateCache(ctx, tenantID, userID)
 	return nil
-}
-
-// tenantIDFromCtx is a small helper re-exported for handlers that need to
-// pull the tenant ID without importing pkg/txscope directly.
-func tenantIDFromCtx(ctx context.Context) (uuid.UUID, bool) {
-	return txscope.TenantIDFromContext(ctx)
-}
-
-func slugify(name string) string {
-	out := make([]rune, 0, len(name))
-	for _, r := range name {
-		switch {
-		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
-			out = append(out, r)
-		case r >= 'A' && r <= 'Z':
-			out = append(out, r+('a'-'A'))
-		case r == ' ' || r == '_' || r == '-':
-			if len(out) > 0 && out[len(out)-1] != '-' {
-				out = append(out, '-')
-			}
-		}
-	}
-	return string(out)
 }
