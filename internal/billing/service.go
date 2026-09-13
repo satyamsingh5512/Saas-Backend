@@ -244,11 +244,39 @@ func (s *Service) currentUsage(ctx context.Context, planCode string, plan *Plan)
 	}
 
 	return &Usage{
-		PlanCode:    planCode,
-		Seats:       counts.Seats,
-		MaxSeats:    plan.MaxSeats,
-		Projects:    counts.Projects,
-		MaxProjects: plan.MaxProjects,
-		Teams:       counts.Teams,
+		PlanCode:     planCode,
+		Seats:        counts.Seats,
+		MaxSeats:     plan.MaxSeats,
+		Projects:     counts.Projects,
+		MaxProjects:  plan.MaxProjects,
+		Teams:        counts.Teams,
+		StorageBytes: counts.StorageBytes,
+		MaxStorageMB: plan.MaxStorageMB,
 	}, nil
+}
+
+// CheckStorageQuota enforces the plan's storage limit before an object is
+// written. A nil plan limit means unlimited storage.
+func (s *Service) CheckStorageQuota(ctx context.Context, _ uuid.UUID, additionalBytes int64) error {
+	if additionalBytes <= 0 {
+		return apperror.New(apperror.CodeValidation, "file size must be greater than zero")
+	}
+	plan, err := s.activePlan(ctx)
+	if err != nil {
+		return err
+	}
+	if plan.MaxStorageMB == nil {
+		return nil
+	}
+	counts, err := s.repo.CountUsage(ctx, time.Now())
+	if err != nil {
+		return apperror.Wrap(apperror.CodeInternal, "failed to count storage usage", err)
+	}
+	limit := int64(*plan.MaxStorageMB) * 1024 * 1024
+	if counts.StorageBytes > limit-additionalBytes {
+		return apperror.New(apperror.CodeForbidden, fmt.Sprintf(
+			"the %s plan allows %d MB of storage; delete files or upgrade before uploading more",
+			plan.Name, *plan.MaxStorageMB))
+	}
+	return nil
 }
