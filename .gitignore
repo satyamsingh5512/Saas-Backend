@@ -10,6 +10,10 @@
 /build/
 .vercel/
 
+# Local file uploads (STORAGE_DRIVER=local default). Production uses a mounted
+# volume or S3; local dev files must never be committed.
+/data/
+
 # Agent working notes: steering rules and skills. Local guidance for how to work
 # in this repo, not part of the shipped project. README.md is the documentation
 # that stays tracked.
