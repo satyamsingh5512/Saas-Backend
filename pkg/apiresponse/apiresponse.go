@@ -66,14 +66,6 @@ func ParsePageQuery(c *gin.Context) (page, pageSize int) {
 	return page, pageSize
 }
 
-// Offset converts a 1-based page number into a SQL OFFSET.
-func Offset(page, pageSize int) int {
-	if page < 1 {
-		page = 1
-	}
-	return (page - 1) * pageSize
-}
-
 // APIError is the structured error payload returned in the envelope's
 // "error" field.
 type APIError struct {
