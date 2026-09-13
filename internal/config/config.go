@@ -110,10 +110,9 @@ type Config struct {
 	S3UsePathStyle bool
 	S3Secure       bool
 
-	// Redis (Phase 11). Empty RedisAddr disables caching gracefully.
-	RedisAddr     string
-	RedisPassword string
-	RedisDB       int
+	// RedisURL is an optional redis:// or rediss:// connection URL. An empty
+	// value disables caching gracefully.
+	RedisURL string
 }
 
 // Load reads configuration from a .env file (if present) and environment variables.
@@ -173,9 +172,7 @@ func Load() *Config {
 		S3UsePathStyle: getEnvBool("S3_USE_PATH_STYLE", false),
 		S3Secure:       getEnvBool("S3_SECURE", true),
 
-		RedisAddr:     getEnv("REDIS_ADDR", ""),
-		RedisPassword: getEnv("REDIS_PASSWORD", ""),
-		RedisDB:       getEnvInt("REDIS_DB", 0),
+		RedisURL: strings.TrimSpace(os.Getenv("REDIS_URL")),
 	}
 }
 
