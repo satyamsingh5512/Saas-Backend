@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -89,6 +90,19 @@ type Config struct {
 	// a relative path.
 	AppBaseURL string
 
+	// File storage. Local storage is the development default; production may use
+	// either a persistent local volume or an S3-compatible object store.
+	StorageDriver  string
+	StorageRoot    string
+	MaxUploadBytes int64
+	S3Endpoint     string
+	S3Region       string
+	S3Bucket       string
+	S3AccessKey    string
+	S3SecretKey    string
+	S3UsePathStyle bool
+	S3Secure       bool
+
 	// Redis (Phase 11). Empty RedisAddr disables caching gracefully.
 	RedisAddr     string
 	RedisPassword string
@@ -143,6 +157,17 @@ func Load() *Config {
 		MailFrom:     strings.TrimSpace(os.Getenv("MAIL_FROM")),
 		AppBaseURL:   strings.TrimRight(strings.TrimSpace(os.Getenv("APP_BASE_URL")), "/"),
 
+		StorageDriver:  strings.ToLower(getEnv("STORAGE_DRIVER", "local")),
+		StorageRoot:    getEnv("STORAGE_ROOT", "./data/uploads"),
+		MaxUploadBytes: getEnvInt64("MAX_UPLOAD_BYTES", 25*1024*1024),
+		S3Endpoint:     strings.TrimSpace(os.Getenv("S3_ENDPOINT")),
+		S3Region:       getEnv("S3_REGION", "us-east-1"),
+		S3Bucket:       strings.TrimSpace(os.Getenv("S3_BUCKET")),
+		S3AccessKey:    strings.TrimSpace(os.Getenv("S3_ACCESS_KEY_ID")),
+		S3SecretKey:    strings.TrimSpace(os.Getenv("S3_SECRET_ACCESS_KEY")),
+		S3UsePathStyle: getEnvBool("S3_USE_PATH_STYLE", false),
+		S3Secure:       getEnvBool("S3_SECURE", true),
+
 		RedisAddr:     getEnv("REDIS_ADDR", ""),
 		RedisPassword: getEnv("REDIS_PASSWORD", ""),
 		RedisDB:       getEnvInt("REDIS_DB", 0),
@@ -168,7 +193,7 @@ func (c *Config) Validate() error {
 		if err != nil || databaseURL.Host == "" || (databaseURL.Scheme != "postgres" && databaseURL.Scheme != "postgresql") {
 			return fmt.Errorf("DATABASE_URL must be a valid postgres:// or postgresql:// connection URL")
 		}
-		return nil
+		return c.ValidateStorage()
 	}
 
 	if c.DBHost == "" || c.DBHost == "localhost" {
@@ -178,6 +203,34 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("DB_USER, DB_PASSWORD, and DB_NAME are required when DATABASE_URL is not set in production")
 	}
 
+	return c.ValidateStorage()
+}
+
+// ValidateStorage rejects a storage configuration that would silently make
+// uploads unavailable or ephemeral in production.
+func (c *Config) ValidateStorage() error {
+	driver := strings.ToLower(strings.TrimSpace(c.StorageDriver))
+	if driver == "" {
+		driver = "local"
+	}
+	if driver != "local" && driver != "s3" {
+		return fmt.Errorf("STORAGE_DRIVER must be local or s3")
+	}
+	if c.MaxUploadBytes <= 0 {
+		return fmt.Errorf("MAX_UPLOAD_BYTES must be greater than zero")
+	}
+	if driver == "local" {
+		if strings.EqualFold(c.Environment, "production") && (strings.TrimSpace(c.StorageRoot) == "" || !filepath.IsAbs(c.StorageRoot)) {
+			return fmt.Errorf("STORAGE_ROOT must point to a persistent writable volume when STORAGE_DRIVER=local in production")
+		}
+		return nil
+	}
+	if c.S3Bucket == "" || c.S3AccessKey == "" || c.S3SecretKey == "" {
+		return fmt.Errorf("S3_BUCKET, S3_ACCESS_KEY_ID, and S3_SECRET_ACCESS_KEY are required when STORAGE_DRIVER=s3")
+	}
+	if c.S3Region == "" {
+		return fmt.Errorf("S3_REGION must be set when STORAGE_DRIVER=s3")
+	}
 	return nil
 }
 
@@ -248,6 +301,30 @@ func getEnvInt(key string, fallback int) int {
 		return fallback
 	}
 	return n
+}
+
+func getEnvInt64(key string, fallback int64) int64 {
+	value, ok := os.LookupEnv(key)
+	if !ok || value == "" {
+		return fallback
+	}
+	n, err := strconv.ParseInt(value, 10, 64)
+	if err != nil {
+		return fallback
+	}
+	return n
+}
+
+func getEnvBool(key string, fallback bool) bool {
+	value, ok := os.LookupEnv(key)
+	if !ok || value == "" {
+		return fallback
+	}
+	parsed, err := strconv.ParseBool(value)
+	if err != nil {
+		return fallback
+	}
+	return parsed
 }
 
 // getEnvList parses a comma-separated environment variable into a slice,
