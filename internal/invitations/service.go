@@ -24,12 +24,6 @@ type SeatQuotaChecker interface {
 	CheckSeatQuota(ctx context.Context, tenantID uuid.UUID) error
 }
 
-// EventPublisher matches the shared eventbus.Publisher shape. Invite delivery is
-// an event consumer's job (email), not this module's.
-type EventPublisher interface {
-	Publish(ctx context.Context, topic string, key string, payload any) error
-}
-
 // Mailer delivers the invite link. Fire-and-forget by contract: the invitation
 // row is already committed by the time it is called, and the plaintext token is
 // also returned to the caller, so the dashboard can show a link whether or not a
@@ -64,18 +58,17 @@ type Service struct {
 	repo   *Repository
 	audit  Recorder
 	quotas SeatQuotaChecker
-	events EventPublisher
 	roles  RoleDelegationAuthorizer
 	mail   Mailer
 	names  TenantNamer
 	cfg    Config
 }
 
-func NewService(repo *Repository, recorder Recorder, quotas SeatQuotaChecker, events EventPublisher, roles RoleDelegationAuthorizer, mail Mailer, names TenantNamer, cfg Config) *Service {
+func NewService(repo *Repository, recorder Recorder, quotas SeatQuotaChecker, roles RoleDelegationAuthorizer, mail Mailer, names TenantNamer, cfg Config) *Service {
 	if cfg.TTL <= 0 {
 		cfg.TTL = 7 * 24 * time.Hour
 	}
-	return &Service{repo: repo, audit: recorder, quotas: quotas, events: events, roles: roles, mail: mail, names: names, cfg: cfg}
+	return &Service{repo: repo, audit: recorder, quotas: quotas, roles: roles, mail: mail, names: names, cfg: cfg}
 }
 
 // CreateInput is the validated input for issuing an invitation. Exactly one of
@@ -163,18 +156,6 @@ func (s *Service) Create(ctx context.Context, entry audit.Entry, tenantID, actor
 			orgName, _ = s.names.NameByID(ctx, tenantID)
 		}
 		s.mail.SendInvitation(ctx, email, orgName, plaintext, invite.ExpiresAt)
-	}
-
-	// The plaintext token is published so an additional consumer can deliver it.
-	// It is deliberately not written to the audit log or application logs.
-	if s.events != nil {
-		_ = s.events.Publish(ctx, "member.invited", invite.ID.String(), map[string]any{
-			"invitation_id": invite.ID,
-			"tenant_id":     tenantID,
-			"email":         email,
-			"token":         plaintext,
-			"expires_at":    invite.ExpiresAt,
-		})
 	}
 
 	return &CreateResult{Invitation: invite, Token: plaintext}, nil
@@ -321,12 +302,6 @@ func (s *Service) Accept(ctx context.Context, in AcceptInput) (*AcceptResult, er
 			TargetType: audit.TargetUser,
 			TargetID:   &id,
 			Metadata:   map[string]any{"email": invite.Email},
-		})
-	}
-
-	if s.events != nil {
-		_ = s.events.Publish(ctx, "member.invitation_accepted", userID.String(), map[string]any{
-			"user_id": userID, "tenant_id": invite.TenantID, "email": invite.Email,
 		})
 	}
 
