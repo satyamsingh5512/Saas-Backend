@@ -6,7 +6,6 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
-	"strconv"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -45,17 +44,6 @@ func GenerateAccessToken(secret string, expiryMinutes int, userID, tenantID uuid
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	return token.SignedString([]byte(secret))
-}
-
-// GenerateAccessTokenLegacyHours preserves the previous JWT_EXPIRY_HOURS-based
-// signature for callers/tests that haven't migrated to the short-lived
-// access + long-lived refresh token model yet.
-func GenerateAccessTokenLegacyHours(secret string, expiryHours string, userID, tenantID uuid.UUID, role string) (string, error) {
-	hours, err := strconv.Atoi(expiryHours)
-	if err != nil || hours <= 0 {
-		hours = 24
-	}
-	return GenerateAccessToken(secret, hours*60, userID, tenantID, role)
 }
 
 // ParseAccessToken validates and parses a JWT, returning its claims.
