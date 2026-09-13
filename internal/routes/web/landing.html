@@ -4,12 +4,12 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="color-scheme" content="dark light" />
-    <meta name="theme-color" content="#000000" />
+    <meta name="theme-color" content="#4a154b" />
     <meta
       name="description"
       content="Tenancy is a production-grade multi-tenant backend in Go: authentication, database-driven RBAC, teams, invitations, API keys, plan quotas and an append-only audit trail, with tenant isolation enforced by PostgreSQL row-level security."
     />
-    <title>Tenancy — multi-tenant backend with isolation the database enforces</title>
+    <title>Tenancy - multi-tenant backend with isolation the database enforces</title>
 
     <!-- Canonical brand surfaces. SVG is the modern favicon, ICO is the legacy
          fallback, PNG handles touch/install contexts, and the manifest points at
@@ -21,24 +21,24 @@
     <link rel="manifest" href="/site.webmanifest" />
     <meta name="application-name" content="Tenancy" />
     <meta name="apple-mobile-web-app-title" content="Tenancy" />
-    <meta name="msapplication-TileColor" content="#000000" />
+    <meta name="msapplication-TileColor" content="#4a154b" />
     <meta name="msapplication-TileImage" content="/assets/brand/icon-192.png" />
 
     <!-- Social cards use the same mark and brand ramp; the image is relative so
          self-hosted deployments do not publish somebody else's canonical host. -->
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="Tenancy" />
-    <meta property="og:title" content="Tenancy — multi-tenant isolation your database enforces" />
-    <meta property="og:description" content="Authentication, database-driven RBAC, teams, invitations, API keys, plan quotas, and an append-only audit trail — one Go binary." />
+    <meta property="og:title" content="Tenancy - multi-tenant isolation your database enforces" />
+    <meta property="og:description" content="Authentication, database-driven RBAC, teams, invitations, API keys, plan quotas, and an append-only audit trail - one Go binary." />
     <meta property="og:image" content="/assets/brand/social-card.png" />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
-    <meta property="og:image:alt" content="Tenancy — multi-tenant isolation your database enforces" />
+    <meta property="og:image:alt" content="Tenancy - multi-tenant isolation your database enforces" />
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="Tenancy — multi-tenant isolation your database enforces" />
-    <meta name="twitter:description" content="Authentication, RBAC, teams, invitations, API keys, quotas, and audit — one Go binary." />
+    <meta name="twitter:title" content="Tenancy - multi-tenant isolation your database enforces" />
+    <meta name="twitter:description" content="Authentication, RBAC, teams, invitations, API keys, quotas, and audit - one Go binary." />
     <meta name="twitter:image" content="/assets/brand/social-card.png" />
-    <meta name="twitter:image:alt" content="Tenancy — multi-tenant isolation your database enforces" />
+    <meta name="twitter:image:alt" content="Tenancy - multi-tenant isolation your database enforces" />
 
     <!--
       Both scripts are synchronous and in <head> on purpose.
@@ -129,7 +129,7 @@
             Tenancy is the organization layer every B2B product needs before it
             can build its own: authentication, database-driven roles, teams,
             invitations, API keys, plan quotas and an append-only audit trail.
-            One Go binary, one Postgres database, many tenants — and a forgotten
+            One Go binary, one Postgres database, many tenants - and a forgotten
             <code class="code">WHERE tenant_id</code> can no longer leak a row.
           </p>
 
@@ -143,12 +143,12 @@
 
           <p class="hero__note rise rise--5">
             Runs on one Postgres container. The dashboard ships inside the
-            binary — no frontend build, no static host, no CORS boundary.
+            binary - no frontend build, no static host, no CORS boundary.
           </p>
 
           <!--
             The workspace, drawn from the real design system rather than captured
-            as an image — so it cannot go stale against a redesign the way a PNG
+            as an image - so it cannot go stale against a redesign the way a PNG
             does, and so it is the actual component styling rather than a
             picture of it.
 
@@ -226,7 +226,7 @@
         No customer logos and no testimonials, because there are none: inventing
         either is the fastest way to lose a technical reader who checks. What
         replaces them is a row of facts about the codebase that anyone can verify
-        by cloning it — which is the form of proof this audience actually values.
+        by cloning it - which is the form of proof this audience actually values.
       -->
       <section class="band band--tight metrics" aria-label="At a glance">
         <div class="ld-shell metrics__grid reveal">
@@ -273,7 +273,7 @@
             No cards here, deliberately. Eight sections built from the same
             bordered rounded rectangle is what makes a page look generated: the
             reader stops seeing sections and starts seeing a template. This one
-            is a ledger — a rule, an index, a claim — because the content is four
+            is a ledger - a rule, an index, a claim - because the content is four
             parallel statements of the same shape, and a ruled list says
             "parallel" more economically than four boxes do.
           -->
@@ -284,7 +284,7 @@
               <p class="fault__text">
                 Isolation lives in whichever <code class="code">WHERE</code>
                 clause the last developer remembered. The query that forgets is
-                indistinguishable from the query that works — until it is in a
+                indistinguishable from the query that works - until it is in a
                 customer's export.
               </p>
             </li>
@@ -312,7 +312,7 @@
               <p class="fault__text">
                 It gets written the week the first security questionnaire lands,
                 on a table the application can still <code class="code">UPDATE</code>
-                — which is the one property an auditor asks about.
+                - which is the one property an auditor asks about.
               </p>
             </li>
           </ol>
@@ -328,7 +328,7 @@
             <p class="sec__sub">
               Pick a tenant, send the same request, and watch where the boundary
               is actually applied. The query below carries no tenant predicate at
-              all — the database adds it.
+              all - the database adds it.
             </p>
           </header>
 
@@ -376,7 +376,7 @@
                   <span class="trace__gutter"><span class="trace__dot"></span></span>
                   <span class="trace__body">
                     <span class="trace__label">Permission gate</span>
-                    <code class="trace__detail">project:view — granted by role</code>
+                    <code class="trace__detail">project:view - granted by role</code>
                   </span>
                 </li>
                 <li class="trace__step" data-step="4">
@@ -390,7 +390,7 @@
                   <span class="trace__gutter"><span class="trace__dot"></span></span>
                   <span class="trace__body">
                     <span class="trace__label">Row-level security filters the result</span>
-                    <code class="trace__detail" data-slot="rows">— rows returned</code>
+                    <code class="trace__detail" data-slot="rows">- rows returned</code>
                   </span>
                 </li>
               </ol>
@@ -535,7 +535,7 @@
             <p class="kicker">What is already finished</p>
             <h2 class="sec__title">Complete on the first day, not scaffolded</h2>
             <p class="sec__sub">
-              Each capability is wired end to end — SQL schema, service rules,
+              Each capability is wired end to end - SQL schema, service rules,
               HTTP surface, and a screen in the workspace.
             </p>
           </header>
@@ -567,7 +567,7 @@
               <p class="def__text">
                 Scoped machine credentials, hashed at rest, revocable. A key
                 authorizes from its own scopes, never from its creator's current
-                role — and cannot be granted role or org management at all.
+                role - and cannot be granted role or org management at all.
               </p>
             </li>
             <li class="def">
@@ -591,7 +591,7 @@
                 strongest available sense: the application role holds no
                 <code class="code">UPDATE</code> or <code class="code">DELETE</code>
                 grant on it, so erasing the trail is not a permission the running
-                process has to lose — it never had it.
+                process has to lose - it never had it.
               </p>
               <ul class="def__facts">
                 <li>Separate product-facing timeline</li>
@@ -740,64 +740,71 @@
         </div>
       </section>
 
-      <!-- ═══════════════════════════ Top courses ═════════════════════════ -->
-      <!-- Static course catalog from the Figma Hack-1/Hack-2 frames: original
-           markup, same course names and enrolment counts, star ratings as text
-           (colour is never the only signal). No JS drives this section. -->
-      <section class="band band--alt" id="courses">
+      <!-- ═══════════════════════ Workspace collaboration ═══════════════ -->
+      <!-- A product-shaped collaboration surface, built from live product
+           concepts rather than copied screenshots, logos, or fictional customer
+           proof. It gives the page an immediate workspace story while keeping
+           the core promise specific to Tenancy: access and data boundaries are
+           designed into the collaboration layer. -->
+      <section class="band band--alt" id="workspaces">
         <div class="ld-shell">
-          <header class="sec reveal">
-            <p class="kicker">Top courses</p>
-            <h2 class="sec__title">Start with a kit, keep a streak</h2>
+          <header class="sec sec--center reveal">
+            <p class="kicker">A workspace that stays in bounds</p>
+            <h2 class="sec__title">Bring people, projects and decisions into one secure rhythm.</h2>
             <p class="sec__sub">
-              Curated challenges drawn from the Community file — interview prep,
-              30-day coding, statistics and JavaScript.
+              Give each organization a clear home for work: teams know what they
+              own, projects carry their members, and every action lands in an
+              audit trail without widening anyone’s access.
             </p>
           </header>
 
-          <ul class="defs reveal reveal--rule">
-            <li class="def">
-              <h3 class="def__title">Interview preparation kit</h3>
-              <p class="def__text">
-                Curated challenges and tips based on learnings from 1000+
-                companies to help you prepare.
-              </p>
-              <ul class="def__facts">
-                <li>50K enrolled</li>
-                <li aria-label="Rated 4 out of 5 stars">★★★★☆</li>
-              </ul>
-            </li>
-            <li class="def">
-              <h3 class="def__title">Learn to code in 30 days</h3>
-              <p class="def__text">
-                Learn if-else statements, recursion, data structures, OOP and more.
-              </p>
-              <ul class="def__facts">
-                <li>40K enrolled</li>
-                <li aria-label="Rated 4 out of 5 stars">★★★★☆</li>
-              </ul>
-            </li>
-            <li class="def">
-              <h3 class="def__title">10 days of statistics</h3>
-              <p class="def__text">
-                Learn probability, distributions, regression and more.
-              </p>
-              <ul class="def__facts">
-                <li>30K enrolled</li>
-                <li aria-label="Rated 4 out of 5 stars">★★★★☆</li>
-              </ul>
-            </li>
-            <li class="def">
-              <h3 class="def__title">10 days of JavaScript</h3>
-              <p class="def__text">
-                Learn and improve your JavaScript fundamentals.
-              </p>
-              <ul class="def__facts">
-                <li>50K enrolled</li>
-                <li aria-label="Rated 5 out of 5 stars">★★★★★</li>
-              </ul>
-            </li>
-          </ul>
+          <div class="flow-stage reveal" aria-label="Example organization workspace with project activity and tenant-scoped access">
+            <aside class="flow-stage__rail">
+              <p class="flow-stage__eyebrow">NORTHSTAR LABS</p>
+              <p class="flow-stage__workspace">Product operations</p>
+              <nav class="flow-stage__nav" aria-label="Example workspace navigation">
+                <span class="flow-stage__nav-item flow-stage__nav-item--active">Overview</span>
+                <span class="flow-stage__nav-item">Projects</span>
+                <span class="flow-stage__nav-item">Teams</span>
+                <span class="flow-stage__nav-item">Activity</span>
+              </nav>
+              <span class="flow-stage__scope"><svg class="icon icon--xs" aria-hidden="true" focusable="false"><use href="#i-shield"></use></svg>Tenant scope active</span>
+            </aside>
+
+            <div class="flow-stage__body">
+              <div class="flow-stage__head">
+                <div>
+                  <p class="flow-stage__eyebrow">THIS WEEK</p>
+                  <h3 class="flow-stage__title">Release readiness</h3>
+                </div>
+                <span class="flow-stage__live"><i></i>All systems tracked</span>
+              </div>
+
+              <ol class="flow-stage__threads">
+                <li class="thread thread--accent">
+                  <span class="thread__avatar">AL</span>
+                  <div class="thread__copy"><b>Ada moved API launch to review</b><span>Platform team · 8 minutes ago</span></div>
+                  <span class="thread__state">Ready</span>
+                </li>
+                <li class="thread">
+                  <span class="thread__avatar thread__avatar--warm">GH</span>
+                  <div class="thread__copy"><b>Grace invited a security reviewer</b><span>Limited to the release project</span></div>
+                  <span class="thread__state thread__state--quiet">Scoped</span>
+                </li>
+                <li class="thread">
+                  <span class="thread__avatar thread__avatar--cool">AT</span>
+                  <div class="thread__copy"><b>Alan closed the launch checklist</b><span>Activity recorded for the organization</span></div>
+                  <span class="thread__state thread__state--quiet">Logged</span>
+                </li>
+              </ol>
+
+              <div class="flow-stage__footer">
+                <span><svg class="icon icon--xs" aria-hidden="true" focusable="false"><use href="#i-lock"></use></svg>Role-aware actions</span>
+                <span><svg class="icon icon--xs" aria-hidden="true" focusable="false"><use href="#i-activity"></use></svg>Append-only history</span>
+                <span><svg class="icon icon--xs" aria-hidden="true" focusable="false"><use href="#i-users"></use></svg>Team memberships</span>
+              </div>
+            </div>
+          </div>
         </div>
       </section>
 
@@ -809,8 +816,8 @@
             <h2 class="sec__title">The plan catalog, read from the live API</h2>
             <p class="sec__sub">
               These cards are not written into this page. They are fetched from
-              <code class="code">GET /api/v1/billing/plans</code> — the same
-              public endpoint your own client would call — so the limits shown
+              <code class="code">GET /api/v1/billing/plans</code> - the same
+              public endpoint your own client would call - so the limits shown
               here are the limits the server actually enforces.
             </p>
           </header>
@@ -932,7 +939,7 @@
                 <p>
                   Email delivery, event publishing, caching and file storage, as
                   above. Two-factor authentication is schema-ready but not
-                  implemented. There is no billing provider integration — the
+                  implemented. There is no billing provider integration - the
                   plan catalog and quota enforcement are real, the card is not.
                 </p>
               </div>
