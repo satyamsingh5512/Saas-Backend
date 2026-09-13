@@ -9,15 +9,25 @@ services:
         condition: service_healthy
     ports:
       - "${PORT:-8080}:8080"
+    volumes:
+      - tenant_saas_uploads:/data/uploads
     environment:
       APP_ENV: production
       PORT: "8080"
       DB_HOST: postgres
       DB_PORT: "5432"
-      DB_USER: ${DB_USER:-postgres}
-      DB_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in the deployment environment}
+      # Runtime traffic must use the non-superuser role. Migrations use the
+      # separate MIGRATE_* credential below and are completed before serving.
+      DB_USER: ${DB_USER:-app_user}
+      DB_PASSWORD: ${DB_PASSWORD:?Set the app_user DB_PASSWORD in the deployment environment}
       DB_NAME: ${DB_NAME:-tenant_saas}
       DB_SSLMODE: disable
+      STORAGE_DRIVER: local
+      STORAGE_ROOT: /data/uploads
+      MAX_UPLOAD_BYTES: ${MAX_UPLOAD_BYTES:-26214400}
+      MIGRATE_DB_HOST: postgres
+      MIGRATE_DB_USER: postgres
+      MIGRATE_DB_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD for the migration role}
       JWT_SECRET: ${JWT_SECRET:?Set a long random JWT_SECRET in the deployment environment}
       JWT_EXPIRY_HOURS: ${JWT_EXPIRY_HOURS:-24}
 
@@ -25,11 +35,16 @@ services:
     image: postgres:16-alpine
     restart: unless-stopped
     environment:
-      POSTGRES_USER: ${DB_USER:-postgres}
-      POSTGRES_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in the deployment environment}
+      # The bootstrap role owns the database and is used only for migrations.
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in the deployment environment}
       POSTGRES_DB: ${DB_NAME:-tenant_saas}
+      APP_DB_USER: app_user
+      APP_DB_PASSWORD: ${DB_PASSWORD:?Set the app_user DB_PASSWORD in the deployment environment}
     volumes:
       - tenant_saas_data:/var/lib/postgresql/data
+      - ./scripts/docker-init-app-role.sh:/docker-entrypoint-initdb.d/00-app-role.sh:ro
+      - ./scripts/provision_app_role.sql:/docker-entrypoint-initdb.d/provision_app_role.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
       interval: 10s
@@ -39,3 +54,4 @@ services:
 
 volumes:
   tenant_saas_data:
+  tenant_saas_uploads:
