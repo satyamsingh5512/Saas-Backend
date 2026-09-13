@@ -71,7 +71,16 @@ GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO app_user;
 -- audit_logs is append-only from the application's perspective: no UPDATE or
 -- DELETE grant, so even a fully compromised application credential cannot
 -- tamper with or erase the audit trail (see migration 000007's design comment).
-REVOKE UPDATE, DELETE ON audit_logs FROM app_user;
+-- The role may be provisioned before migrations on a fresh Docker volume, so
+-- apply this restriction only when the table already exists; migration 000014
+-- repeats it after the table is created.
+DO $$
+BEGIN
+    IF to_regclass('public.audit_logs') IS NOT NULL THEN
+        EXECUTE 'REVOKE UPDATE, DELETE ON audit_logs FROM app_user';
+    END IF;
+END
+$$;
 
 -- Ensure tables created by future migrations (run as the superuser/owner
 -- role) automatically grant the same privileges to app_user without a manual
