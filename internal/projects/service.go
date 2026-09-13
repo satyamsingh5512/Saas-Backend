@@ -56,7 +56,7 @@ type CreateInput struct {
 
 // Create creates a project, enforcing the tenant's plan project quota first.
 func (s *Service) Create(ctx context.Context, entry audit.Entry, tenantID, actorID uuid.UUID, in CreateInput) (*Project, error) {
-	projectSlug, err := s.resolveSlug(in.Slug, in.Name)
+	projectSlug, err := slug.Resolve(in.Slug, in.Name)
 	if err != nil {
 		return nil, err
 	}
@@ -160,7 +160,7 @@ func (s *Service) Update(ctx context.Context, entry audit.Entry, projectID uuid.
 		project.Name = name
 	}
 	if in.Slug != nil {
-		newSlug, err := s.resolveSlug(*in.Slug, project.Name)
+		newSlug, err := slug.Resolve(*in.Slug, project.Name)
 		if err != nil {
 			return nil, err
 		}
@@ -282,23 +282,6 @@ func (s *Service) ListMembers(ctx context.Context, projectID uuid.UUID, page, pa
 }
 
 // --- internal helpers ---
-
-func (s *Service) resolveSlug(explicit, name string) (string, error) {
-	if trimmed := strings.TrimSpace(explicit); trimmed != "" {
-		if !slug.Valid(trimmed) {
-			return "", apperror.New(apperror.CodeValidation,
-				"slug must be lowercase alphanumeric with single hyphens")
-		}
-		return trimmed, nil
-	}
-
-	derived := slug.Make(name)
-	if derived == "" {
-		return "", apperror.New(apperror.CodeValidation,
-			"could not derive a slug from the name; supply one explicitly")
-	}
-	return derived, nil
-}
 
 func (s *Service) recordProjectAction(ctx context.Context, entry audit.Entry, action, verb string, project *Project) {
 	if s.audit == nil {
