@@ -45,6 +45,27 @@ services:
       - key: APP_BASE_URL
         sync: false
 
+      # Render disks are not part of this preview blueprint, so production file
+      # uploads use an S3-compatible bucket. Set these in the Render dashboard.
+      - key: STORAGE_DRIVER
+        value: s3
+      - key: MAX_UPLOAD_BYTES
+        value: "26214400"
+      - key: S3_ENDPOINT
+        sync: false
+      - key: S3_REGION
+        value: us-east-1
+      - key: S3_BUCKET
+        sync: false
+      - key: S3_ACCESS_KEY_ID
+        sync: false
+      - key: S3_SECRET_ACCESS_KEY
+        sync: false
+      - key: S3_USE_PATH_STYLE
+        value: "false"
+      - key: S3_SECURE
+        value: "true"
+
       - key: DATABASE_URL
         fromDatabase:
           name: tenant-saas-postgres
