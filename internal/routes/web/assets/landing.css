@@ -1058,6 +1058,209 @@
 .close__sub { max-width: 54ch; margin-top: var(--sp-12); color: var(--fg-muted); font-size: var(--fs-14); line-height: 1.6; }
 .close__cta { display: flex; flex-wrap: wrap; justify-content: center; gap: var(--sp-10); margin-top: var(--sp-24); }
 
+/* ──────────────── Aubergine marketing adaptation ───────────────────── */
+
+/* The landing owns the expansive cream-lavender composition and generous pill
+   actions. The dashboard deliberately retains denser controls, so it remains a
+   productive workspace rather than inheriting marketing-sized UI. */
+.hero {
+  background:
+    linear-gradient(135deg, var(--canvas-cream), var(--canvas-lavender));
+}
+.hero::before {
+  inset: -220px 0 auto;
+  height: 720px;
+  background:
+    radial-gradient(44% 54% at 18% 44%, color-mix(in srgb, var(--canvas-lavender) 86%, transparent), transparent 70%),
+    radial-gradient(42% 50% at 86% 20%, color-mix(in srgb, var(--brand-200) 58%, transparent), transparent 72%),
+    radial-gradient(32% 40% at 54% 6%, color-mix(in srgb, var(--canvas-cream) 92%, transparent), transparent 70%);
+}
+.hero::after { background-image: none; mask-image: none; }
+.hero__inner { align-items: flex-start; padding-top: clamp(48px, 8vh, 80px); text-align: left; }
+.hero__title { max-width: 17ch; font-weight: 700; letter-spacing: -0.04em; }
+.hero__title-dim { color: var(--brand-fg); }
+.hero__sub { max-width: 58ch; font-size: var(--fs-16); }
+.hero__cta { justify-content: flex-start; }
+.hero__note { max-width: 56ch; }
+
+.ld-nav { background: color-mix(in srgb, var(--surface) 92%, transparent); }
+.ld-nav.is-stuck { background: color-mix(in srgb, var(--surface) 97%, transparent); }
+.ld-nav .btn,
+.hero .btn,
+.close .btn,
+.plan .btn {
+  border-radius: var(--r-full);
+  font-weight: 700;
+}
+.ld-nav .btn--primary,
+.hero .btn--primary,
+.plan .btn--primary { background: var(--surface-aubergine); }
+.ld-nav .btn--primary:hover:not([disabled]),
+.hero .btn--primary:hover:not([disabled]),
+.plan .btn--primary:hover:not([disabled]) { background: var(--brand-500); }
+.hero .btn--lg { min-height: 48px; padding-inline: var(--sp-28); font-size: var(--fs-16); }
+.hero .btn--secondary {
+  min-height: 48px;
+  padding-inline: var(--sp-28);
+  background: var(--canvas-lavender);
+  border-color: transparent;
+  box-shadow: none;
+}
+.hero .btn--secondary:hover:not([disabled]) { background: var(--brand-100); }
+
+.plan { border-radius: var(--r-xl); }
+.plan--featured {
+  background: var(--surface-aubergine);
+  border-color: var(--surface-aubergine);
+  box-shadow: none;
+}
+.plan--featured .plan__name,
+.plan--featured .plan__amount,
+.plan--featured .plan__limits li { color: var(--brand-on); }
+.plan--featured .plan__per,
+.plan--featured .plan__limits li .icon { color: var(--brand-200); }
+.plan--featured .plan__flag { background: var(--canvas-cream); color: var(--brand-fg); }
+.plan--featured .btn--primary { background: var(--surface); color: var(--brand-fg); }
+.plan--featured .btn--primary:hover:not([disabled]) { background: var(--canvas-cream); }
+
+.close-band { background: var(--surface-aubergine); border-top: 0; }
+.close__title { color: var(--brand-on); }
+.close__sub { color: var(--brand-200); }
+.close .btn--primary { background: var(--surface); color: var(--brand-fg); }
+.close .btn--primary:hover:not([disabled]) { background: var(--canvas-cream); }
+.close .btn--secondary { background: transparent; border-color: var(--brand-on); color: var(--brand-on); box-shadow: none; }
+.close .btn--secondary:hover:not([disabled]) { background: color-mix(in srgb, var(--brand-on) 12%, transparent); }
+
+.ld-foot { background: var(--surface-aubergine); border-top: 1px solid var(--brand-tint); }
+.ld-foot__text, .ld-foot__col a { color: var(--brand-200); }
+.ld-foot__h, .ld-foot__col a:hover { color: var(--brand-on); }
+.ld-foot .ld-brand { color: var(--brand-on); }
+
+@media (max-width: 640px) {
+  .hero__inner { align-items: center; text-align: center; }
+  .hero__cta { justify-content: stretch; }
+  .hero .btn--lg { padding-inline: var(--sp-16); }
+}
+
+/* ─────────────────── Collaboration workspace surface ────────────────── */
+
+/* This is intentionally an application surface, not a recreation of another
+   product's messaging interface. Its visual language comes from Tenancy's own
+   primitives: a tenant rail, scoped activity, readable member identity, and
+   auditable project state. */
+.flow-stage {
+  display: grid;
+  grid-template-columns: 228px minmax(0, 1fr);
+  overflow: hidden;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-xl);
+  box-shadow: var(--edge), var(--sh-xl);
+  text-align: left;
+}
+.flow-stage__rail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-10);
+  padding: var(--sp-20) var(--sp-16);
+  background: var(--chrome);
+  border-right: 1px solid var(--border);
+}
+.flow-stage__eyebrow {
+  color: var(--fg-subtle);
+  font-family: var(--mono);
+  font-size: var(--fs-10);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.flow-stage__workspace {
+  color: var(--fg);
+  font-size: var(--fs-15);
+  font-weight: 620;
+  letter-spacing: -0.014em;
+}
+.flow-stage__nav { display: flex; flex-direction: column; gap: var(--sp-3); margin-top: var(--sp-12); }
+.flow-stage__nav-item {
+  padding: var(--sp-8) var(--sp-10);
+  border-radius: var(--r-md);
+  color: var(--fg-muted);
+  font-size: var(--fs-12);
+}
+.flow-stage__nav-item--active { background: var(--brand-subtle); color: var(--brand-fg); font-weight: 600; }
+.flow-stage__scope {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-6);
+  margin-top: auto;
+  padding-top: var(--sp-16);
+  border-top: 1px solid var(--border);
+  color: var(--ok-fg);
+  font-size: var(--fs-11);
+  font-weight: 600;
+}
+.flow-stage__body { min-width: 0; padding: clamp(20px, 4vw, 36px); background: var(--canvas); }
+.flow-stage__head { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--sp-16); }
+.flow-stage__title { margin-top: var(--sp-6); color: var(--fg); font-size: var(--fs-20); font-weight: 620; letter-spacing: -0.022em; }
+.flow-stage__live {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-6);
+  padding: var(--sp-5) var(--sp-9);
+  background: var(--ok-bg);
+  border-radius: var(--r-full);
+  color: var(--ok-fg);
+  font-size: var(--fs-10);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.flow-stage__live i { width: 6px; height: 6px; border-radius: var(--r-full); background: currentColor; }
+.flow-stage__threads { display: flex; flex-direction: column; gap: var(--sp-8); margin-top: var(--sp-24); list-style: none; }
+.thread {
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--sp-10);
+  padding: var(--sp-12);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  box-shadow: var(--edge);
+  transition: border-color var(--t) var(--ease), transform var(--t) var(--ease);
+}
+.thread:hover { border-color: var(--border-strong); transform: translateX(var(--sp-3)); }
+.thread--accent { border-color: color-mix(in srgb, var(--brand-600) 34%, var(--border)); }
+.thread__avatar {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  background: var(--brand-tint);
+  border-radius: var(--r-md);
+  color: var(--brand-fg);
+  font-size: var(--fs-10);
+  font-weight: 700;
+}
+.thread__avatar--warm { background: var(--warn-bg); color: var(--warn-fg); }
+.thread__avatar--cool { background: var(--info-bg); color: var(--info-fg); }
+.thread__copy { display: flex; min-width: 0; flex-direction: column; gap: var(--sp-3); }
+.thread__copy b { overflow: hidden; color: var(--fg); font-size: var(--fs-12); font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.thread__copy span { color: var(--fg-subtle); font-size: var(--fs-11); }
+.thread__state { padding: var(--sp-2) var(--sp-8); background: var(--ok-bg); border-radius: var(--r-full); color: var(--ok-fg); font-size: var(--fs-10); font-weight: 600; }
+.thread__state--quiet { background: var(--fill); color: var(--fg-subtle); }
+.flow-stage__footer { display: flex; flex-wrap: wrap; gap: var(--sp-12) var(--sp-20); margin-top: var(--sp-20); padding-top: var(--sp-16); border-top: 1px solid var(--border); color: var(--fg-subtle); font-size: var(--fs-11); }
+.flow-stage__footer span { display: inline-flex; align-items: center; gap: var(--sp-6); }
+.flow-stage__footer .icon { color: var(--brand-fg); }
+
+@media (max-width: 640px) {
+  .flow-stage { grid-template-columns: minmax(0, 1fr); }
+  .flow-stage__rail { display: none; }
+  .flow-stage__head { align-items: flex-start; flex-direction: column; }
+  .thread { grid-template-columns: 30px minmax(0, 1fr); }
+  .thread__state { display: none; }
+  .flow-stage__footer { gap: var(--sp-10); }
+}
+
 /* ─────────────────────────────── Footer ────────────────────────────── */
 
 .ld-foot { padding: var(--sp-48) 0 var(--sp-32); border-top: 1px solid var(--border); background: var(--chrome); }
