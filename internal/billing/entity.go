@@ -77,10 +77,12 @@ type SubscriptionView struct {
 // Usage reports current consumption against the active plan's limits, which is
 // what a billing screen needs to render "3 of 5 seats used".
 type Usage struct {
-	PlanCode    string `json:"plan_code"`
-	Seats       int64  `json:"seats"`
-	MaxSeats    *int   `json:"max_seats"`
-	Projects    int64  `json:"projects"`
-	MaxProjects *int   `json:"max_projects"`
-	Teams       int64  `json:"teams"`
+	PlanCode     string `json:"plan_code"`
+	Seats        int64  `json:"seats"`
+	MaxSeats     *int   `json:"max_seats"`
+	Projects     int64  `json:"projects"`
+	MaxProjects  *int   `json:"max_projects"`
+	Teams        int64  `json:"teams"`
+	StorageBytes int64  `json:"storage_bytes"`
+	MaxStorageMB *int   `json:"max_storage_mb"`
 }
