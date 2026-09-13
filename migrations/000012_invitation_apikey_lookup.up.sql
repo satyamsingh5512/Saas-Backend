@@ -105,9 +105,9 @@ $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
 DO $$
 BEGIN
     IF EXISTS (SELECT FROM pg_roles WHERE rolname = 'app_user') THEN
-        GRANT EXECUTE ON FUNCTION find_invitation_by_hash(TEXT) TO app_user;
-        GRANT EXECUTE ON FUNCTION find_api_key_by_hash(TEXT) TO app_user;
-        GRANT EXECUTE ON FUNCTION accept_invitation(TEXT, UUID, TEXT, TEXT) TO app_user;
+        EXECUTE 'GRANT EXECUTE ON FUNCTION find_invitation_by_hash(TEXT) TO app_user';
+        EXECUTE 'GRANT EXECUTE ON FUNCTION find_api_key_by_hash(TEXT) TO app_user';
+        EXECUTE 'GRANT EXECUTE ON FUNCTION accept_invitation(TEXT, UUID, TEXT, TEXT) TO app_user';
     END IF;
 END
 $$;
