@@ -649,13 +649,14 @@ still a 404, because there the client explicitly named a tenant.
 
 Caching is implemented: `internal/platform/cache` is a fail-open Redis adapter
 behind the `tenancy.CacheReader` and `authz.PermissionCache` seams. Set
-`REDIS_ADDR=host:port` (plus `REDIS_PASSWORD` / `REDIS_DB` for managed tiers;
-any free tier works) and permission checks plus pre-auth tenant resolution are
-served from Redis with a 5-minute TTL. Leave it unset and every check queries
-Postgres, which is correct but slower. An unreachable Redis degrades to the
-same uncached behavior with one startup warning, so a sleeping free tier costs
-latency, never errors. Role assignment, revocation, permission edits and role
-deletion invalidate the affected holders; the TTL is only the backstop.
+`REDIS_URL` to the provider connection string, such as
+`rediss://:password@redis.example.com:6379/0` (any free tier works), and
+permission checks plus pre-auth tenant resolution are served from Redis with a
+5-minute TTL. Leave it unset and every check queries Postgres, which is correct
+but slower. An invalid or unreachable Redis URL degrades to the same uncached
+behavior with one startup warning, so a sleeping free tier costs latency, never
+errors. Role assignment, revocation, permission edits and role deletion
+invalidate the affected holders; the TTL is only the backstop.
 
 A keep-alive loop (`internal/platform/keepalive`, on by default,
 `KEEPALIVE_INTERVAL=1m`) pings the database pool and `GET`s
