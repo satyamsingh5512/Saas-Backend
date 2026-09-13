@@ -198,3 +198,77 @@ func (r *Repository) RoleSlugs(ctx context.Context, userID uuid.UUID) ([]string,
 	}
 	return slugs, nil
 }
+
+// profileRecord is the flattened result of the profile projection. Keeping this
+// internal lets GetProfile fetch the non-cacheable profile fields in one
+// tenant-scoped round trip without changing the public API shape.
+type profileRecord struct {
+	UserID                uuid.UUID
+	Email                 string
+	FullName              string
+	AvatarURL             *string
+	Status                string
+	EmailVerifiedAt       *time.Time
+	LastLoginAt           *time.Time
+	CreatedAt             time.Time
+	PreferenceTimezone    string
+	PreferenceLocale      string
+	PreferenceTheme       string
+	PreferenceEmailNotify bool
+	PreferenceUpdatedAt   *time.Time
+	OrganizationID        uuid.UUID
+	OrganizationName      string
+	OrganizationSlug      string
+	OrganizationPlanCode  string
+	RoleSlugs             string
+}
+
+const loadProfileQuery = `
+SELECT
+	u.id AS user_id,
+	u.email,
+	u.full_name,
+	u.avatar_url,
+	u.status,
+	u.email_verified_at,
+	u.last_login_at,
+	u.created_at,
+	COALESCE(up.timezone, 'UTC') AS preference_timezone,
+	COALESCE(up.locale, 'en-US') AS preference_locale,
+	COALESCE(up.theme, 'dark') AS preference_theme,
+	COALESCE(up.email_notifications, true) AS preference_email_notify,
+	up.updated_at AS preference_updated_at,
+	t.id AS organization_id,
+	t.name AS organization_name,
+	t.slug AS organization_slug,
+	t.plan_code AS organization_plan_code,
+	COALESCE((
+		SELECT string_agg(r.slug, ',' ORDER BY r.rank ASC)
+		FROM roles r
+		JOIN user_roles ur ON ur.role_id = r.id
+		WHERE ur.user_id = u.id
+			AND ur.tenant_id = u.tenant_id
+			AND r.tenant_id = u.tenant_id
+	), '') AS role_slugs
+FROM users u
+JOIN tenants t ON t.id = u.tenant_id
+LEFT JOIN user_preferences up ON up.user_id = u.id
+WHERE u.id = ? AND u.deleted_at IS NULL
+`
+
+// LoadProfile fetches all stable profile fields in one tenant-scoped query.
+// Permissions intentionally remain in authz.Service so its fail-open cache and
+// invalidation guarantees continue to apply.
+func (r *Repository) LoadProfile(ctx context.Context, userID uuid.UUID) (*profileRecord, error) {
+	var record profileRecord
+	err := txscope.WithTenantTx(ctx, r.db, func(tx *gorm.DB) error {
+		return tx.Raw(loadProfileQuery, userID).Scan(&record).Error
+	})
+	if err != nil {
+		return nil, fmt.Errorf("preferences: load profile: %w", err)
+	}
+	if record.UserID == uuid.Nil {
+		return nil, ErrNotFound
+	}
+	return &record, nil
+}
