@@ -1,6 +1,7 @@
 package identity
 
 import (
+	"bytes"
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
@@ -69,13 +70,7 @@ func (s *Service) decodeOAuthState(raw string) (oauthState, error) {
 	if err != nil {
 		return st, errors.New("invalid state")
 	}
-	sepIdx := -1
-	for i := len(decoded) - 1; i >= 0; i-- {
-		if decoded[i] == '.' {
-			sepIdx = i
-			break
-		}
-	}
+	sepIdx := bytes.LastIndexByte(decoded, '.')
 	if sepIdx == -1 {
 		return st, errors.New("invalid state")
 	}
