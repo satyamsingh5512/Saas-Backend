@@ -2082,10 +2082,12 @@
     content: el("div", { class: "card" }, tableSkeleton(2, 5)),
   },
     async (signal) => {
-      const [profile, prefs] = await Promise.all([call("/profile", { signal }), call("/preferences", { signal })]);
-      return { profile, prefs };
+      // GET /profile already embeds preferences, so no second fetch.
+      const profile = await call("/profile", { signal });
+      return { profile };
     },
-    ({ profile, prefs }) => {
+    ({ profile }) => {
+      const prefs = profile.preferences;
       const page = el("div", { class: "page page--narrow" },
         pageHead("Settings", "Your profile, display preferences, and password."));
 
@@ -2674,8 +2676,12 @@
     $("#read-all").addEventListener("click", async () => {
       try {
         await call("/notifications/read-all", { method: "POST" });
+        // Read-all succeeded, so the unread count is provably zero: clear the
+        // badge locally instead of spending a /notifications/unread-count call
+        // to learn what the 200 already proved.
+        $("#bell-dot").hidden = true;
+        $("#bell").setAttribute("aria-label", "Notifications");
         await openNotifications();
-        badgeCount();
       } catch (e) { if (shouldSurfaceAsyncError(e)) toast(e.message, "err"); }
     });
 
