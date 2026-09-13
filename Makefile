@@ -1,4 +1,4 @@
-.PHONY: run build test test-verbose vet fmt tidy db-up db-down clean migrate-up migrate-down migrate-version db-provision-app-role check-web build-vercel
+.PHONY: run build test test-integration test-verbose vet fmt tidy db-up db-down clean migrate-up migrate-down migrate-version db-provision-app-role check-web build-vercel
 
 ## Run the server locally (requires DB running and .env configured)
 run:
@@ -11,6 +11,10 @@ build:
 ## Run all tests
 test:
 	go test ./...
+
+## Run the PostgreSQL-backed integration suite and fail if its database is unavailable
+test-integration:
+	REQUIRE_INTEGRATION_DB=1 go test ./internal/routes -count=1 -v
 
 ## Run all tests with verbose output
 test-verbose:
