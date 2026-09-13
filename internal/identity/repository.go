@@ -151,13 +151,26 @@ func (r *Repository) UpdateTx(tx *gorm.DB, user *User) error {
 	return tx.Save(user).Error
 }
 
-// ValidateCredentialState re-reads the tenant and user for every protected
-// request. JWT claims and API credentials identify the subject; they do not
-// override current suspension, disablement, or soft deletion state.
+// ValidateCredentialState re-checks that the JWT subject and its tenant are
+// currently active. One tenant-scoped join replaces two sequential reads while
+// retaining RLS and ensuring the user belongs to the credential's tenant.
 func (r *Repository) ValidateCredentialState(ctx context.Context, tenantID, userID uuid.UUID) error {
 	return txscope.WithTenantTxID(ctx, r.db, tenantID, func(tx *gorm.DB) error {
-		_, err := r.activeCredentialUserTx(tx, tenantID, userID, false)
-		return err
+		var state struct{ ID uuid.UUID }
+		if err := tx.Table("users u").
+			Select("u.id").
+			Joins("JOIN tenants t ON t.id = u.tenant_id").
+			Where("u.id = ? AND u.tenant_id = ? AND u.deleted_at IS NULL AND u.status <> ?", userID, tenantID, StatusDisabled).
+			Where("t.id = ? AND t.status = ? AND t.deleted_at IS NULL", tenantID, "active").
+			Scan(&state).Error; err != nil {
+			return err
+		}
+		if state.ID == uuid.Nil {
+			// The middleware intentionally presents inactive tenants and users as
+			// the same forbidden response, so avoid exposing which side failed.
+			return ErrUserInactive
+		}
+		return nil
 	})
 }
 
