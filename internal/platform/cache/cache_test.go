@@ -37,9 +37,16 @@ func TestNilCacheIsSafe(t *testing.T) {
 	}
 }
 
-func TestNewDisabledWithoutAddr(t *testing.T) {
-	if c := New("", "", 0, testLogger()); c != nil {
-		t.Error("expected nil cache with empty addr")
+func TestNewDisabledWithoutURL(t *testing.T) {
+	if c := New("", testLogger()); c != nil {
+		t.Error("expected nil cache with empty URL")
+		_ = c.Close()
+	}
+}
+
+func TestNewInvalidURLFallsBackToNil(t *testing.T) {
+	if c := New("not a redis URL", testLogger()); c != nil {
+		t.Error("expected nil cache for invalid Redis URL")
 		_ = c.Close()
 	}
 }
@@ -47,23 +54,23 @@ func TestNewDisabledWithoutAddr(t *testing.T) {
 func TestNewUnreachableFallsBackToNil(t *testing.T) {
 	// Nothing listens here; the constructor must warn and return nil fast,
 	// not hang the startup on dial timeouts.
-	if c := New("127.0.0.1:1", "", 0, testLogger()); c != nil {
+	if c := New("redis://127.0.0.1:1/0", testLogger()); c != nil {
 		t.Error("expected nil cache for unreachable Redis")
 		_ = c.Close()
 	}
 }
 
-// liveCache dials REDIS_ADDR when the environment provides one and skips
+// liveCache dials TEST_REDIS_URL when the environment provides one and skips
 // otherwise, mirroring the repo's skip-without-dependency test convention.
 func liveCache(t *testing.T) *Cache {
 	t.Helper()
-	addr := os.Getenv("TEST_REDIS_ADDR")
-	if addr == "" {
-		t.Skip("TEST_REDIS_ADDR is unset; skipping live Redis test")
+	redisURL := os.Getenv("TEST_REDIS_URL")
+	if redisURL == "" {
+		t.Skip("TEST_REDIS_URL is unset; skipping live Redis test")
 	}
-	c := New(addr, os.Getenv("TEST_REDIS_PASSWORD"), 0, testLogger())
+	c := New(redisURL, testLogger())
 	if c == nil {
-		t.Skipf("Redis at %s is unreachable; skipping live Redis test", addr)
+		t.Skip("Redis is unreachable or TEST_REDIS_URL is invalid; skipping live Redis test")
 	}
 	t.Cleanup(func() { _ = c.Close() })
 	return c
