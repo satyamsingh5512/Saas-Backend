@@ -31,54 +31,39 @@ func NewRepository(db *gorm.DB) *Repository {
 
 // ListPlans returns the active plan catalog, cheapest first.
 //
-// subscription_plans is platform metadata with no RLS policy, so this
-// deliberately runs outside tenant scope: the catalog is identical for every
-// tenant, and requiring a tenant context would break the pre-signup pricing view.
+// subscription_plans is global platform metadata with no RLS policy, so this
+// direct read avoids an unnecessary BEGIN/COMMIT round trip on the public
+// pricing endpoint.
 func (r *Repository) ListPlans(ctx context.Context) ([]Plan, error) {
 	var plans []Plan
-	err := txscope.WithoutTenantScope(ctx, r.db, func(tx *gorm.DB) error {
-		return tx.Where("is_active = ?", true).Order("price_cents ASC").Find(&plans).Error
-	})
-	if err != nil {
+	if err := r.db.WithContext(ctx).Where("is_active = ?", true).Order("price_cents ASC").Find(&plans).Error; err != nil {
 		return nil, fmt.Errorf("billing: list plans: %w", err)
 	}
 	return plans, nil
 }
 
-// FindPlanByCode looks up a single active plan by its stable code.
+// FindPlanByCode looks up a single active global plan by its stable code.
 func (r *Repository) FindPlanByCode(ctx context.Context, code string) (*Plan, error) {
 	var plan Plan
-	err := txscope.WithoutTenantScope(ctx, r.db, func(tx *gorm.DB) error {
-		e := tx.Where("code = ? AND is_active = ?", code, true).First(&plan).Error
-		if errors.Is(e, gorm.ErrRecordNotFound) {
-			return ErrPlanNotFound
-		}
-		return e
-	})
+	err := r.db.WithContext(ctx).Where("code = ? AND is_active = ?", code, true).First(&plan).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, ErrPlanNotFound
+	}
 	if err != nil {
-		if errors.Is(err, ErrPlanNotFound) {
-			return nil, err
-		}
 		return nil, fmt.Errorf("billing: find plan by code: %w", err)
 	}
 	return &plan, nil
 }
 
-// FindPlanByID looks up a plan by primary key, used to resolve a subscription's
-// plan for display.
+// FindPlanByID looks up a global plan by primary key, used to resolve a
+// subscription's plan for display.
 func (r *Repository) FindPlanByID(ctx context.Context, id uuid.UUID) (*Plan, error) {
 	var plan Plan
-	err := txscope.WithoutTenantScope(ctx, r.db, func(tx *gorm.DB) error {
-		e := tx.Where("id = ?", id).First(&plan).Error
-		if errors.Is(e, gorm.ErrRecordNotFound) {
-			return ErrPlanNotFound
-		}
-		return e
-	})
+	err := r.db.WithContext(ctx).Where("id = ?", id).First(&plan).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, ErrPlanNotFound
+	}
 	if err != nil {
-		if errors.Is(err, ErrPlanNotFound) {
-			return nil, err
-		}
 		return nil, fmt.Errorf("billing: find plan by id: %w", err)
 	}
 	return &plan, nil
