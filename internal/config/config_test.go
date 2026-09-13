@@ -69,3 +69,12 @@ func TestValidateStorageAllowsDevelopmentLocalDefaults(t *testing.T) {
 		t.Fatalf("ValidateStorage() returned an unexpected error: %v", err)
 	}
 }
+
+func TestLoadReadsTrimmedRedisURL(t *testing.T) {
+	t.Setenv("REDIS_URL", "  rediss://:password@redis.example.com:6379/2  ")
+
+	cfg := Load()
+	if got, want := cfg.RedisURL, "rediss://:password@redis.example.com:6379/2"; got != want {
+		t.Errorf("RedisURL = %q, want %q", got, want)
+	}
+}
