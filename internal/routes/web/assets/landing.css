@@ -270,16 +270,12 @@
 .hero__cta { display: flex; flex-wrap: wrap; justify-content: center; gap: var(--sp-10); margin-top: var(--sp-28); }
 .hero__note { max-width: 48ch; margin-top: var(--sp-16); color: var(--fg-subtle); font-size: var(--fs-12); line-height: 1.55; }
 
-/* ──────────────────────── Product figure (stage) ────────────────────── */
+/* ────────────────── Interactive Slack-like Workspace Mockup ─────────────── */
 
-/* The workspace, drawn from the real design system. It carries real labels and
-   figures rather than grey bars: a row of grey bars is the visual language of a
-   loading skeleton, so the previous version of this figure said "a UI goes here"
-   instead of showing one. Nothing in it is a captured image, so it cannot go
-   stale against a redesign. */
-.stage {
+.slack-mockup {
+  position: relative;
   width: 100%;
-  max-width: 980px;
+  max-width: 1020px;
   margin-top: clamp(40px, 7vh, 72px);
   background: var(--surface);
   border: 1px solid var(--border);
@@ -289,22 +285,89 @@
   text-align: left;
 }
 
-.stage__bar {
+/* Chrome Titlebar / Top Window Bar */
+.slack-mockup__bar {
   display: flex;
   align-items: center;
   gap: var(--sp-12);
-  height: 38px; /* control height */
+  height: 44px;
   padding: 0 var(--sp-14);
   background: var(--chrome);
   border-bottom: 1px solid var(--border);
 }
-.stage__dots { display: inline-flex; gap: var(--sp-6); }
-.stage__dots i { width: 8px; height: 8px; border-radius: var(--r-full); background: var(--border-strong); }
-.stage__path { color: var(--fg-subtle); font-family: var(--mono); font-size: var(--fs-11); }
-.stage__path em { color: var(--fg-muted); font-style: normal; }
-.stage__kbd {
-  margin-left: auto;
-  padding: var(--sp-2) var(--sp-8);
+
+.slack-mockup__dots {
+  display: inline-flex;
+  gap: var(--sp-6);
+  flex: none;
+}
+.slack-mockup__dots i {
+  width: 10px;
+  height: 10px;
+  border-radius: var(--r-full);
+  background: var(--border-strong);
+}
+.slack-mockup__dots i:nth-child(1) { background: var(--err-solid); opacity: 0.85; }
+.slack-mockup__dots i:nth-child(2) { background: var(--warn-fg); opacity: 0.85; }
+.slack-mockup__dots i:nth-child(3) { background: var(--ok-fg); opacity: 0.85; }
+
+.slack-mockup__toggle-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--control);
+  color: var(--fg-muted);
+  cursor: pointer;
+  flex: none;
+}
+.slack-mockup__toggle-btn:hover {
+  background: var(--hover);
+  color: var(--fg);
+  border-color: var(--border-strong);
+}
+.slack-mockup__toggle-btn:focus-visible {
+  outline: none;
+  box-shadow: var(--ring);
+}
+.slack-mockup__toggle-btn svg {
+  width: 14px;
+  height: 14px;
+}
+
+.slack-mockup__search {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+  flex: 1;
+  max-width: 440px;
+  height: 28px;
+  padding: 0 var(--sp-10);
+  background: var(--sunken);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  color: var(--fg-subtle);
+  font-size: var(--fs-12);
+}
+.slack-mockup__search svg {
+  flex: none;
+  width: 13px;
+  height: 13px;
+  color: var(--fg-subtle);
+}
+.slack-mockup__search span {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.slack-mockup__kbd {
+  flex: none;
+  padding: var(--sp-1) var(--sp-6);
   background: var(--control);
   border: 1px solid var(--border);
   border-radius: var(--r-sm);
@@ -313,113 +376,565 @@
   font-size: var(--fs-10);
 }
 
-.stage__body { display: grid; grid-template-columns: 188px minmax(0, 1fr); }
+.slack-mockup__bar-right {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-10);
+  margin-left: auto;
+}
 
-.stage__side {
+.slack-mockup__status {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-6);
+  padding: var(--sp-2) var(--sp-8);
+  background: var(--ok-bg);
+  border: 1px solid color-mix(in srgb, var(--ok-fg) 25%, transparent);
+  border-radius: var(--r-full);
+  color: var(--ok-fg);
+  font-size: var(--fs-11);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.slack-mockup__pulse-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: var(--r-full);
+  background: currentColor;
+}
+
+.slack-mockup__user {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: var(--r-full);
+  background: var(--brand-subtle);
+  border: 1px solid color-mix(in srgb, var(--brand-600) 24%, transparent);
+  color: var(--brand-fg);
+  font-size: var(--fs-10);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+/* Workspace Body */
+.slack-mockup__body {
+  display: flex;
+  position: relative;
+  min-height: 490px;
+  overflow: hidden;
+}
+
+/* Left Mini Workspace Rail (Slack's icon rail) */
+.slack-mockup__rail {
   display: flex;
   flex-direction: column;
-  gap: var(--sp-2);
-  padding: var(--sp-12);
+  align-items: center;
+  gap: var(--sp-8);
+  width: 52px;
+  padding: var(--sp-12) 0;
+  background: var(--brand-800);
+  border-right: 1px solid color-mix(in srgb, var(--brand-300) 12%, transparent);
+  flex: none;
+}
+.slack-mockup__rail-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: var(--r-md);
+  font-size: var(--fs-13);
+  font-weight: 700;
+  cursor: default;
+}
+.slack-mockup__rail-badge--active {
+  background: var(--brand-600);
+  color: var(--brand-on);
+  box-shadow: 0 0 0 2px var(--brand-300);
+}
+.slack-mockup__rail-badge--muted {
+  background: color-mix(in srgb, var(--brand-600) 40%, transparent);
+  color: color-mix(in srgb, var(--brand-on) 65%, transparent);
+}
+
+/* Collapsible Left Sidebar */
+.slack-mockup__sidebar {
+  display: flex;
+  flex-direction: column;
+  width: 236px;
+  flex: none;
   background: var(--chrome);
   border-right: 1px solid var(--border);
+  padding: var(--sp-12);
+  overflow-y: auto;
+  opacity: 1;
+  transform: translateX(0);
 }
-.stage__org {
-  display: grid;
-  grid-template-columns: 22px 1fr;
-  grid-template-rows: auto auto;
+
+/* Organization Header inside Sidebar */
+.slack-mockup__org {
+  display: flex;
   align-items: center;
-  gap: 0 var(--sp-9);
-  padding: var(--sp-8) var(--sp-9);
-  margin-bottom: var(--sp-10);
+  gap: var(--sp-9);
+  padding: var(--sp-8) var(--sp-10);
+  margin-bottom: var(--sp-12);
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: var(--r-md);
+  border-radius: var(--r-lg);
   box-shadow: var(--edge);
 }
-.stage__mark {
-  grid-row: span 2;
-  width: 22px;
-  height: 22px;
+.slack-mockup__org-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
   border-radius: var(--r-sm);
-  background: linear-gradient(140deg, var(--brand-500), var(--brand-700));
-}
-.stage__org b { font-size: var(--fs-12); font-weight: 600; letter-spacing: -0.01em; }
-.stage__org em { color: var(--fg-subtle); font-size: var(--fs-10); font-style: normal; }
-.stage__nav {
-  padding: var(--sp-7) var(--sp-9);
-  border-radius: var(--r-md);
-  color: var(--fg-muted);
+  background: linear-gradient(135deg, var(--brand-500), var(--brand-700));
+  color: var(--brand-on);
   font-size: var(--fs-12);
+  font-weight: 700;
+  flex: none;
 }
-.stage__nav--on { background: var(--brand-subtle); color: var(--brand-fg); font-weight: 600; }
-
-.stage__main { display: flex; flex-direction: column; gap: var(--sp-14); padding: var(--sp-16); background: var(--canvas); }
-
-.stage__meters { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--sp-10); }
-.meter-mini {
+.slack-mockup__org-text {
   display: flex;
   flex-direction: column;
-  gap: var(--sp-6);
-  padding: var(--sp-11) var(--sp-12);
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--r-lg);
-  box-shadow: var(--edge);
+  min-width: 0;
 }
-.meter-mini b {
-  color: var(--fg-subtle);
-  font-size: var(--fs-10);
+.slack-mockup__org-name {
+  font-size: var(--fs-13);
   font-weight: 600;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-}
-.meter-mini em {
+  letter-spacing: -0.01em;
   color: var(--fg);
-  font-size: var(--fs-16);
-  font-style: normal;
-  font-weight: 620;
-  letter-spacing: -0.02em;
-  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.meter-mini em s { color: var(--fg-subtle); font-size: var(--fs-11); font-weight: 400; text-decoration: none; }
-.meter-mini__track { height: 4px; border-radius: var(--r-full); background: var(--fill); overflow: hidden; }
-.meter-mini__fill { display: block; height: 100%; border-radius: var(--r-full); background: var(--brand-600); }
-/* Widths as modifier classes: style-src 'self' blocks the attribute that would
-   otherwise carry them, and these are content, not state. */
-.meter-mini__fill--18 { width: 18%; }
-.meter-mini__fill--24 { width: 24%; }
-/* Past 80% the quota bar warns, exactly as it does in the real dashboard —
-   the figure should not depict a state the product cannot produce. */
-.meter-mini__fill--82 { width: 82%; background: var(--warn-fg); }
+.slack-mockup__org-plan {
+  font-size: var(--fs-10);
+  color: var(--fg-subtle);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-weight: 500;
+}
 
-.stage__table {
-  padding: var(--sp-4) var(--sp-14) var(--sp-8);
+/* Sidebar Section Headers */
+.slack-mockup__section-title {
+  padding: var(--sp-8) var(--sp-8) var(--sp-4);
+  font-size: var(--fs-10);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--fg-subtle);
+}
+
+/* Channel & Tab Buttons in Sidebar */
+.slack-mockup__channel,
+.slack-mockup__tab {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+  width: 100%;
+  height: 32px;
+  padding: 0 var(--sp-8);
+  margin-bottom: var(--sp-2);
+  border: 1px solid transparent;
+  border-radius: var(--r-md);
+  background: none;
+  color: var(--fg-muted);
+  font-family: var(--sans);
+  font-size: var(--fs-12);
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+}
+.slack-mockup__channel:hover,
+.slack-mockup__tab:hover {
+  background: var(--hover);
+  color: var(--fg);
+}
+.slack-mockup__channel:focus-visible,
+.slack-mockup__tab:focus-visible {
+  outline: none;
+  box-shadow: var(--ring);
+}
+.slack-mockup__channel.is-active,
+.slack-mockup__tab.is-active {
+  background: var(--brand-subtle);
+  color: var(--brand-fg);
+  font-weight: 600;
+  border-color: color-mix(in srgb, var(--brand-600) 18%, transparent);
+}
+.slack-mockup__hash {
+  font-family: var(--mono);
+  color: var(--fg-subtle);
+  font-weight: 600;
+  flex: none;
+}
+.slack-mockup__channel.is-active .slack-mockup__hash {
+  color: var(--brand-fg);
+}
+.slack-mockup__channel-name,
+.slack-mockup__tab-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.slack-mockup__badge {
+  padding: var(--sp-1) var(--sp-6);
+  border-radius: var(--r-full);
+  background: var(--fill);
+  color: var(--fg-muted);
+  font-size: var(--fs-10);
+  font-weight: 600;
+  flex: none;
+}
+.slack-mockup__channel.is-active .slack-mockup__badge,
+.slack-mockup__tab.is-active .slack-mockup__badge {
+  background: color-mix(in srgb, var(--brand-600) 16%, var(--surface));
+  color: var(--brand-fg);
+}
+
+/* Sidebar Footer Guard Status */
+.slack-mockup__sidebar-foot {
+  margin-top: auto;
+  padding-top: var(--sp-10);
+  border-top: 1px solid var(--border);
+}
+.slack-mockup__guard-card {
+  padding: var(--sp-8) var(--sp-10);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  box-shadow: var(--edge);
+}
+.slack-mockup__guard-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-6);
+  font-size: var(--fs-11);
+  font-weight: 600;
+  color: var(--fg);
+}
+.slack-mockup__guard-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: var(--r-full);
+  background: var(--ok-fg);
+  flex: none;
+}
+.slack-mockup__guard-text {
+  margin-top: var(--sp-3);
+  font-size: var(--fs-10);
+  color: var(--fg-subtle);
+  line-height: 1.4;
+}
+
+/* Main Content Area */
+.slack-mockup__main {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  background: var(--canvas);
+}
+
+/* Channel Header */
+.slack-mockup__channel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-12);
+  height: 48px;
+  padding: 0 var(--sp-16);
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  flex: none;
+}
+.slack-mockup__channel-title-group {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.slack-mockup__channel-title {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-6);
+  font-size: var(--fs-14);
+  font-weight: 600;
+  color: var(--fg);
+  letter-spacing: -0.01em;
+}
+.slack-mockup__channel-topic {
+  font-size: var(--fs-11);
+  color: var(--fg-subtle);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.slack-mockup__channel-tabs {
+  display: inline-flex;
+  padding: var(--sp-2);
+  background: var(--sunken);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  flex: none;
+}
+.slack-mockup__h-tab {
+  padding: var(--sp-3) var(--sp-10);
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--fg-muted);
+  font-family: var(--sans);
+  font-size: var(--fs-11);
+  font-weight: 500;
+  cursor: pointer;
+}
+.slack-mockup__h-tab:hover {
+  color: var(--fg);
+}
+.slack-mockup__h-tab:focus-visible {
+  outline: none;
+  box-shadow: var(--ring);
+}
+.slack-mockup__h-tab.is-active {
+  background: var(--surface);
+  color: var(--fg);
+  font-weight: 600;
+  box-shadow: var(--sh-xs);
+}
+
+/* Panels Grid Stack (CSS-Driven View Switching) */
+.slack-mockup__panels {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  padding: var(--sp-16);
+  flex: 1;
+  overflow-y: auto;
+}
+
+.slack-mockup__panel {
+  grid-area: 1 / 1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-14);
+  opacity: 0;
+  transform: translateY(8px);
+  pointer-events: none;
+  visibility: hidden;
+}
+
+/* Active Panel State */
+.slack-mockup[data-active-view="rls"] #ws-panel-rls,
+.slack-mockup[data-active-view="keys"] #ws-panel-keys,
+.slack-mockup[data-active-view="audit"] #ws-panel-audit {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+  visibility: visible;
+}
+
+/* KPI Tiles inside Panels */
+.slack-mockup__kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--sp-10);
+}
+.slack-mockup__kpi {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+  padding: var(--sp-10) var(--sp-12);
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--r-lg);
   box-shadow: var(--edge);
 }
-.stage__tr {
-  display: grid;
-  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) 78px;
-  align-items: center;
-  gap: var(--sp-12);
-  padding: var(--sp-10) 0;
-  border-bottom: 1px solid var(--border);
-  font-size: var(--fs-12);
-}
-.stage__tr:last-child { border-bottom: 0; }
-.stage__tr b { color: var(--fg); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.stage__tr em { color: var(--fg-muted); font-style: normal; }
-.stage__tr--head { padding: var(--sp-9) 0; }
-.stage__tr--head b {
-  color: var(--fg-subtle);
+.slack-mockup__kpi-label {
   font-size: var(--fs-10);
-  font-weight: 600;
+  font-weight: 700;
   letter-spacing: 0.05em;
   text-transform: uppercase;
+  color: var(--fg-subtle);
 }
+.slack-mockup__kpi-val {
+  font-size: var(--fs-15);
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  color: var(--fg);
+}
+.slack-mockup__kpi-sub {
+  font-size: var(--fs-11);
+  color: var(--fg-muted);
+}
+
+/* Card Surfaces (SQL card, tables, sandbox) */
+.slack-mockup__card {
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  box-shadow: var(--edge);
+  overflow: hidden;
+}
+
+.slack-mockup__card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 36px;
+  padding: 0 var(--sp-12);
+  background: var(--chrome);
+  border-bottom: 1px solid var(--border);
+}
+.slack-mockup__card-title {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-6);
+  font-family: var(--mono);
+  font-size: var(--fs-11);
+  font-weight: 600;
+  color: var(--fg-muted);
+}
+.slack-mockup__copy-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-4);
+  padding: var(--sp-2) var(--sp-6);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--control);
+  color: var(--fg-subtle);
+  font-size: var(--fs-10);
+  font-family: var(--mono);
+  cursor: pointer;
+}
+.slack-mockup__copy-btn:hover {
+  background: var(--hover);
+  color: var(--fg);
+}
+.slack-mockup__copy-btn:focus-visible {
+  outline: none;
+  box-shadow: var(--ring);
+}
+.slack-mockup__copy-btn svg {
+  width: 12px;
+  height: 12px;
+}
+
+/* Code Snippet Box */
+.slack-mockup__code {
+  margin: 0;
+  padding: var(--sp-12) var(--sp-14);
+  background: var(--sunken);
+  color: var(--fg);
+  font-family: var(--mono);
+  font-size: var(--fs-11);
+  line-height: 1.65;
+  overflow-x: auto;
+  white-space: pre;
+}
+.token-kw { color: var(--brand-fg); font-weight: 600; }
+.token-fn { color: var(--link-fg); }
+.token-str { color: var(--ok-fg); }
+.token-cm { color: var(--fg-subtle); font-style: italic; }
+
+/* Sandbox Transaction Box */
+.slack-mockup__sandbox-head {
+  padding: var(--sp-8) var(--sp-12);
+  background: var(--chrome);
+  border-bottom: 1px solid var(--border);
+  font-family: var(--mono);
+  font-size: var(--fs-11);
+  color: var(--fg-muted);
+}
+.slack-mockup__sandbox-head code {
+  color: var(--brand-fg);
+  font-weight: 600;
+}
+
+/* Data Tables */
+.slack-mockup__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--fs-11);
+}
+.slack-mockup__table th,
+.slack-mockup__table td {
+  padding: var(--sp-8) var(--sp-12);
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+}
+.slack-mockup__table th {
+  background: var(--chrome);
+  font-size: var(--fs-10);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--fg-subtle);
+}
+.slack-mockup__table tr:last-child td {
+  border-bottom: 0;
+}
+.slack-mockup__table td {
+  color: var(--fg);
+}
+.slack-mockup__table code {
+  font-family: var(--mono);
+  font-size: var(--fs-10);
+  padding: var(--sp-1) var(--sp-4);
+  border-radius: var(--r-sm);
+  background: var(--sunken);
+  border: 1px solid var(--border);
+  color: var(--fg);
+}
+
+/* Security Callout Banner */
+.slack-mockup__callout {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-8);
+  padding: var(--sp-9) var(--sp-12);
+  border-radius: var(--r-md);
+  background: var(--brand-subtle);
+  border: 1px solid color-mix(in srgb, var(--brand-600) 20%, transparent);
+  color: var(--fg-muted);
+  font-size: var(--fs-11);
+  line-height: 1.5;
+}
+.slack-mockup__callout svg {
+  flex: none;
+  width: 15px;
+  height: 15px;
+  margin-top: var(--sp-1);
+  color: var(--brand-fg);
+}
+.slack-mockup__callout strong {
+  color: var(--fg);
+}
+
+/* Collapsed Sidebar State (Transforms & Opacity Only) */
+.slack-mockup[data-sidebar="collapsed"] .slack-mockup__sidebar {
+  opacity: 0;
+  transform: translateX(-100%);
+  pointer-events: none;
+  margin-right: -236px;
+}
+.slack-mockup[data-sidebar="collapsed"] .slack-mockup__toggle-btn svg {
+  transform: rotate(180deg);
+}
+
+/* Tag styles */
 .tag {
+  display: inline-flex;
+  align-items: center;
   justify-self: start;
   padding: var(--sp-1) var(--sp-8);
   background: var(--fill);
@@ -429,6 +944,26 @@
   font-style: normal;
 }
 .tag--ok { background: var(--ok-bg); color: var(--ok-fg); }
+.tag--err { background: var(--err-bg); color: var(--err-fg); }
+
+/* ── Motion: animations exclusively wrapped in prefers-reduced-motion ── */
+@media (prefers-reduced-motion: no-preference) {
+  .slack-mockup__sidebar {
+    transition: opacity var(--t-slow) var(--ease), transform var(--t-slow) var(--ease);
+  }
+  .slack-mockup__panel {
+    transition: opacity var(--t) var(--ease), transform var(--t) var(--ease);
+  }
+  .slack-mockup__toggle-btn svg {
+    transition: transform var(--t) var(--ease);
+  }
+  .slack-mockup__channel,
+  .slack-mockup__tab,
+  .slack-mockup__h-tab,
+  .slack-mockup__copy-btn {
+    transition: opacity var(--t-fast) var(--ease), transform var(--t-fast) var(--ease);
+  }
+}
 
 /* ──────────────────────────────── Metrics ───────────────────────────── */
 
@@ -1378,12 +1913,11 @@
   .ld-foot__grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
-/* 900: the figure's sidebar is dropped rather than squeezed — below this it is
-   narrower than the workspace chip inside it, and the figure is decorative, so
-   losing a column costs nothing. */
+/* 900: on smaller displays, adjust sidebar width */
 @media (max-width: 900px) {
-  .stage__body { grid-template-columns: minmax(0, 1fr); }
-  .stage__side { display: none; }
+  .slack-mockup__rail { display: none; }
+  .slack-mockup__sidebar { width: 200px; }
+  .slack-mockup[data-sidebar="collapsed"] .slack-mockup__sidebar { margin-right: -200px; }
 }
 
 /* 640: phone. The section links go — they duplicate a scroll the reader can
@@ -1393,13 +1927,9 @@
   .ld-nav__links { display: none; }
   .hero__cta, .close__cta { width: 100%; flex-direction: column; align-items: stretch; }
   .hero__cta .btn, .close__cta .btn { width: 100%; }
-  .stage__meters { grid-template-columns: minmax(0, 1fr); }
-  .stage__tr { grid-template-columns: minmax(0, 1fr) 72px; }
-  /* Body rows hide the owner at phone width, so the matching header has to
-     leave too. Without this the three <b> cells flowed into a two-column grid
-     and "STATUS" wrapped onto a second header row above the first project. */
-  .stage__tr em,
-  .stage__tr--head b:nth-child(2) { display: none; }
+  .slack-mockup__kpi-grid { grid-template-columns: minmax(0, 1fr); }
+  .slack-mockup__channel-tabs { display: none; }
+  .slack-mockup__search { display: none; }
   .faults, .defs { grid-template-columns: minmax(0, 1fr); }
   .def, .def--wide, .def--full { grid-column: span 1; }
   .creed__item { grid-template-columns: minmax(0, 1fr); gap: var(--sp-8); }
@@ -1417,8 +1947,8 @@
    decorative gradients go entirely — in a two-colour palette they render as flat
    blocks over content. */
 @media (forced-colors: active) {
-  .stage, .stage__org, .meter-mini, .stage__table, .plan, .guard, .node,
-  .demo, .code-card, .def__facts li, .tag { border: 1px solid CanvasText; }
+  .slack-mockup, .slack-mockup__org, .slack-mockup__card, .slack-mockup__kpi,
+  .plan, .guard, .node, .demo, .code-card, .def__facts li, .tag { border: 1px solid CanvasText; }
   .ld-brand:focus-visible,
   .ld-nav__links a:focus-visible,
   .ld-foot__col a:focus-visible,
