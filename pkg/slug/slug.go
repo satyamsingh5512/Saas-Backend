@@ -5,6 +5,8 @@ import (
 	"regexp"
 	"strings"
 	"unicode"
+
+	"github.com/satym-in/tenant-saas-backend/pkg/apperror"
 )
 
 // maxLength keeps generated slugs within the VARCHAR/CITEXT column widths used
@@ -55,4 +57,25 @@ func Valid(s string) bool {
 		return false
 	}
 	return Make(s) == s
+}
+
+// Resolve validates an explicitly supplied slug, or derives one from name
+// when none was given. Shared by every module that names user-visible
+// resources (teams, projects) so explicit-slug validation and the derive
+// fallback cannot drift apart between modules.
+func Resolve(explicit, name string) (string, error) {
+	if trimmed := strings.TrimSpace(explicit); trimmed != "" {
+		if !Valid(trimmed) {
+			return "", apperror.New(apperror.CodeValidation,
+				"slug must be lowercase alphanumeric with single hyphens")
+		}
+		return trimmed, nil
+	}
+
+	derived := Make(name)
+	if derived == "" {
+		return "", apperror.New(apperror.CodeValidation,
+			"could not derive a slug from the name; supply one explicitly")
+	}
+	return derived, nil
 }
