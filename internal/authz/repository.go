@@ -385,6 +385,21 @@ func (r *Repository) UserRoles(ctx context.Context, userID uuid.UUID) ([]Role, e
 	return roles, nil
 }
 
+// UserIDsWithRole returns the IDs of every user holding roleID within the
+// current tenant scope. Used to invalidate cached permission sets when a
+// role's permission set changes or the role is deleted: without it, holders
+// would keep serving the pre-change set until the TTL expired.
+func (r *Repository) UserIDsWithRole(ctx context.Context, roleID uuid.UUID) ([]uuid.UUID, error) {
+	var ids []uuid.UUID
+	err := txscope.WithTenantTx(ctx, r.db, func(tx *gorm.DB) error {
+		return tx.Model(&UserRole{}).Where("role_id = ?", roleID).Pluck("user_id", &ids).Error
+	})
+	if err != nil {
+		return nil, fmt.Errorf("authz: users with role: %w", err)
+	}
+	return ids, nil
+}
+
 // AssignRole grants roleID to userID within the current tenant scope.
 func (r *Repository) AssignRole(ctx context.Context, ur *UserRole) error {
 	return txscope.WithTenantTx(ctx, r.db, func(tx *gorm.DB) error {
