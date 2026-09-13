@@ -50,10 +50,10 @@ $$ LANGUAGE sql SECURITY DEFINER SET search_path = public;
 DO $$
 BEGIN
     IF EXISTS (SELECT FROM pg_roles WHERE rolname = 'app_user') THEN
-        GRANT EXECUTE ON FUNCTION find_refresh_token_by_hash(TEXT) TO app_user;
-        GRANT EXECUTE ON FUNCTION find_verification_token_by_hash(TEXT) TO app_user;
-        GRANT EXECUTE ON FUNCTION find_oauth_account_by_provider(TEXT, TEXT) TO app_user;
-        GRANT EXECUTE ON FUNCTION find_users_by_email(TEXT) TO app_user;
+        EXECUTE 'GRANT EXECUTE ON FUNCTION find_refresh_token_by_hash(TEXT) TO app_user';
+        EXECUTE 'GRANT EXECUTE ON FUNCTION find_verification_token_by_hash(TEXT) TO app_user';
+        EXECUTE 'GRANT EXECUTE ON FUNCTION find_oauth_account_by_provider(TEXT, TEXT) TO app_user';
+        EXECUTE 'GRANT EXECUTE ON FUNCTION find_users_by_email(TEXT) TO app_user';
     END IF;
 END
 $$;
