@@ -59,7 +59,7 @@ func RequireAuth(jwtSecret string, validator CredentialStateValidator) gin.Handl
 			return
 		}
 
-		if err := tenancy.OverrideFromJWT(c, claims.TenantID); err != nil {
+		if err := tenancy.OverrideFromCredential(c, claims.TenantID); err != nil {
 			apiresponse.Error(c, apperror.CodeTenantMismatch.HTTPStatus(), string(apperror.CodeTenantMismatch), err.Error())
 			return
 		}
