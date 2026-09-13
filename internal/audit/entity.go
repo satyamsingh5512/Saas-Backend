@@ -75,6 +75,8 @@ const (
 	ActionInviteRevoked      = "invitation.revoked"
 	ActionInviteAccepted     = "invitation.accepted"
 	ActionSubscriptionChange = "billing.subscription_changed"
+	ActionFileUploaded       = "file.uploaded"
+	ActionFileDeleted        = "file.deleted"
 	ActionPasswordChanged    = "auth.password_changed"
 )
 
@@ -83,6 +85,7 @@ const (
 	TargetOrganization = "organization"
 	TargetTeam         = "team"
 	TargetProject      = "project"
+	TargetFile         = "file"
 	TargetUser         = "user"
 )
 
