@@ -12,7 +12,6 @@ import (
 	"github.com/satym-in/tenant-saas-backend/internal/authz"
 	"github.com/satym-in/tenant-saas-backend/internal/billing"
 	"github.com/satym-in/tenant-saas-backend/internal/config"
-	"github.com/satym-in/tenant-saas-backend/internal/eventbus"
 	"github.com/satym-in/tenant-saas-backend/internal/files"
 	"github.com/satym-in/tenant-saas-backend/internal/identity"
 	"github.com/satym-in/tenant-saas-backend/internal/invitations"
@@ -20,6 +19,7 @@ import (
 	"github.com/satym-in/tenant-saas-backend/internal/middleware"
 	"github.com/satym-in/tenant-saas-backend/internal/notifications"
 	"github.com/satym-in/tenant-saas-backend/internal/platform"
+	"github.com/satym-in/tenant-saas-backend/internal/platform/cache"
 	"github.com/satym-in/tenant-saas-backend/internal/preferences"
 	"github.com/satym-in/tenant-saas-backend/internal/projects"
 	"github.com/satym-in/tenant-saas-backend/internal/teams"
@@ -65,11 +65,16 @@ func Setup(db *gorm.DB, cfg *config.Config) *gin.Engine {
 	router.Use(middleware.CORS(cfg.CORSAllowedOrigins))
 
 	// --- Module wiring (dependency injection root) ---
+	// Redis caching is optional: empty REDIS_ADDR (the default) or an
+	// unreachable instance yields a nil cache, and both consumers degrade to
+	// querying Postgres on every check -- correct, just slower.
+	permissionCache := cache.New(cfg.RedisAddr, cfg.RedisPassword, cfg.RedisDB, appLogger)
+
 	tenantRepo := tenancy.NewRepository(db)
-	tenantResolver := tenancy.NewResolver(tenantRepo, nil, cfg.TenantBaseDomain) // nil cache until Redis phase
+	tenantResolver := tenancy.NewResolver(tenantRepo, permissionCache, cfg.TenantBaseDomain)
 
 	authzRepo := authz.NewRepository(db)
-	authzService := authz.NewService(authzRepo, nil) // nil cache until Redis phase
+	authzService := authz.NewService(authzRepo, permissionCache)
 	authzHandler := authz.NewHandler(authzService)
 
 	auditService := audit.NewService(audit.NewRepository(db), appLogger)
@@ -129,7 +134,7 @@ func Setup(db *gorm.DB, cfg *config.Config) *gin.Engine {
 	mailNotifier := mailer.NewNotifier(mailSender, cfg.AppBaseURL, appLogger)
 
 	invitationService := invitations.NewService(
-		invitations.NewRepository(db), auditService, billingService, eventbus.NoopPublisher{}, authzService,
+		invitations.NewRepository(db), auditService, billingService, authzService,
 		mailNotifier, tenantRepo,
 		invitations.Config{TTL: config.Duration(cfg.InvitationTTL, 0)})
 	invitationHandler := invitations.NewHandler(invitationService)
@@ -143,7 +148,7 @@ func Setup(db *gorm.DB, cfg *config.Config) *gin.Engine {
 	preferenceHandler := preferences.NewHandler(preferenceService)
 
 	identityRepo := identity.NewRepository(db)
-	identityService := identity.NewService(identityRepo, tenantRepo, authzService, eventbus.NoopPublisher{}, mailNotifier, db, identity.Config{
+	identityService := identity.NewService(identityRepo, tenantRepo, authzService, mailNotifier, db, identity.Config{
 		JWTSecret:            cfg.JWTSecret,
 		AccessTokenTTL:       config.Duration(cfg.AccessTokenTTL, 0),
 		RefreshTokenTTL:      config.Duration(cfg.RefreshTokenTTL, 0),
