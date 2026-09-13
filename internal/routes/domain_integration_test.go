@@ -1,10 +1,13 @@
 package routes_test
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -40,7 +43,7 @@ func cleanupDomainTenant(t *testing.T, database *gorm.DB, slug string) {
 	if err := superuserDB.Where("slug = ?", slug).First(&tenant).Error; err == nil {
 		for _, table := range []string{
 			"invitations", "api_keys", "notifications", "activity_events",
-			"audit_logs", "user_preferences", "subscriptions",
+			"audit_logs", "user_preferences", "files", "subscriptions",
 			"team_members", "project_members", "projects", "teams",
 		} {
 			superuserDB.Exec(fmt.Sprintf("DELETE FROM %s WHERE tenant_id = ?", table), tenant.ID)
@@ -48,6 +51,21 @@ func cleanupDomainTenant(t *testing.T, database *gorm.DB, slug string) {
 	}
 
 	cleanupTenant(t, database, slug)
+}
+
+func doMultipart(router *gin.Engine, path, token, filename, content string) *httptest.ResponseRecorder {
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	part, _ := writer.CreateFormFile("file", filename)
+	_, _ = part.Write([]byte(content))
+	_ = writer.Close()
+
+	req := httptest.NewRequest(http.MethodPost, path, &body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	req.Header.Set("Authorization", "Bearer "+token)
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, req)
+	return recorder
 }
 
 // registerOwner creates a tenant with an owner user and returns the owner's access
@@ -570,6 +588,49 @@ func TestAuditLog_RecordsDomainActions(t *testing.T) {
 	}
 	if activity[0]["verb"] != "created" {
 		t.Errorf("expected verb created, got %v", activity[0]["verb"])
+	}
+}
+
+func TestFiles_UploadListDownloadAndDelete(t *testing.T) {
+	router, database, _ := setupTestRouter(t)
+	slug := uniqueSlug("files")
+	defer cleanupDomainTenant(t, database, slug)
+
+	token, _ := registerOwner(t, router, slug)
+	content := "tenant-isolated file content"
+	w := doMultipart(router, "/api/v1/files", token, "report.txt", content)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201 uploading file, got %d: %s", w.Code, w.Body.String())
+	}
+	created := dataObject(t, w)
+	fileID, _ := created["id"].(string)
+	if fileID == "" || created["original_name"] != "report.txt" {
+		t.Fatalf("unexpected file response: %s", w.Body.String())
+	}
+
+	w = doJSON(router, http.MethodGet, "/api/v1/files", nil, token)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 listing files, got %d: %s", w.Code, w.Body.String())
+	}
+	if items := dataArray(t, w); len(items) != 1 {
+		t.Fatalf("expected one uploaded file, got %d: %s", len(items), w.Body.String())
+	}
+
+	w = doJSON(router, http.MethodGet, "/api/v1/files/"+fileID+"/download", nil, token)
+	if w.Code != http.StatusOK || w.Body.String() != content {
+		t.Fatalf("download returned %d/%q, want 200/%q", w.Code, w.Body.String(), content)
+	}
+	if !strings.Contains(w.Header().Get("Content-Disposition"), "report.txt") {
+		t.Fatalf("download did not include the original filename: %q", w.Header().Get("Content-Disposition"))
+	}
+
+	w = doJSON(router, http.MethodDelete, "/api/v1/files/"+fileID, nil, token)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 deleting file, got %d: %s", w.Code, w.Body.String())
+	}
+	w = doJSON(router, http.MethodGet, "/api/v1/files/"+fileID, nil, token)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("expected deleted file to return 404, got %d: %s", w.Code, w.Body.String())
 	}
 }
 
