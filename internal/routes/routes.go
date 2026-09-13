@@ -4,6 +4,7 @@ import (
 	"embed"
 	"io/fs"
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/satym-in/tenant-saas-backend/internal/apikeys"
@@ -12,6 +13,7 @@ import (
 	"github.com/satym-in/tenant-saas-backend/internal/billing"
 	"github.com/satym-in/tenant-saas-backend/internal/config"
 	"github.com/satym-in/tenant-saas-backend/internal/eventbus"
+	"github.com/satym-in/tenant-saas-backend/internal/files"
 	"github.com/satym-in/tenant-saas-backend/internal/identity"
 	"github.com/satym-in/tenant-saas-backend/internal/invitations"
 	"github.com/satym-in/tenant-saas-backend/internal/mailer"
@@ -86,6 +88,30 @@ func Setup(db *gorm.DB, cfg *config.Config) *gin.Engine {
 	// the plan's max_projects limit at creation time.
 	projectService := projects.NewService(projects.NewRepository(db), auditService, billingService, notificationService)
 	projectHandler := projects.NewHandler(projectService)
+
+	storageDriver := strings.ToLower(strings.TrimSpace(cfg.StorageDriver))
+	if storageDriver == "" {
+		storageDriver = "local"
+	}
+	var fileStore files.ObjectStore
+	switch storageDriver {
+	case "local":
+		root := cfg.StorageRoot
+		if root == "" {
+			root = "./data/uploads"
+		}
+		fileStore = files.NewLocalStore(root)
+	case "s3":
+		var err error
+		fileStore, err = files.NewS3Store(cfg.S3Endpoint, cfg.S3Region, cfg.S3Bucket, cfg.S3AccessKey, cfg.S3SecretKey, cfg.S3Secure, cfg.S3UsePathStyle)
+		if err != nil {
+			panic(err)
+		}
+	default:
+		panic("unsupported STORAGE_DRIVER: " + storageDriver)
+	}
+	fileService := files.NewService(files.NewRepository(db), fileStore, auditService, billingService, cfg.MaxUploadBytes)
+	fileHandler := files.NewHandler(fileService, cfg.MaxUploadBytes)
 
 	// Mail transport is chosen once, here: a configured Resend key selects the
 	// HTTP sender, an unset one selects the no-op that logs an undeliverable
@@ -259,6 +285,16 @@ func Setup(db *gorm.DB, cfg *config.Config) *gin.Engine {
 				inviteGroup.GET("", authzService.RequirePermission(authz.PermMemberView), invitationHandler.List)
 				inviteGroup.POST("", authzService.RequirePermission(authz.PermMemberInvite), invitationHandler.Create)
 				inviteGroup.DELETE("/:inviteID", authzService.RequirePermission(authz.PermMemberInvite), invitationHandler.Revoke)
+			}
+
+			// --- Files ---
+			fileGroup := protected.Group("/files")
+			{
+				fileGroup.GET("", authzService.RequirePermission(authz.PermFileView), fileHandler.List)
+				fileGroup.POST("", authzService.RequirePermission(authz.PermFileUpload), fileHandler.Upload)
+				fileGroup.GET("/:fileID", authzService.RequirePermission(authz.PermFileView), fileHandler.Get)
+				fileGroup.GET("/:fileID/download", authzService.RequirePermission(authz.PermFileView), fileHandler.Download)
+				fileGroup.DELETE("/:fileID", authzService.RequirePermission(authz.PermFileDelete), fileHandler.Delete)
 			}
 
 			// --- API keys: minting is restricted to user sessions so a leaked key
