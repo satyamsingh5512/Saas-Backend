@@ -107,6 +107,31 @@ services:
       - key: INVITATION_TTL
         value: 168h
 
+      # Redis caching (free tier works: Render Key Value, Upstash, etc.).
+      # Create the instance once, then paste its values here; Render preserves
+      # sync:false entries across deploys. Format is host:port (no scheme).
+      # Empty REDIS_ADDR disables caching gracefully -- every check queries
+      # Postgres instead, which is correct but slower. A sleeping or
+      # unreachable Redis is equally safe: reads fail open to a miss, so the
+      # only symptom is uncached latency until it answers again.
+      - key: REDIS_ADDR
+        sync: false
+      - key: REDIS_PASSWORD
+        sync: false
+      - key: REDIS_DB
+        value: "0"
+
+      # Keep-alive against free-tier idle sleep. Every KEEPALIVE_INTERVAL the
+      # server pings the database pool and GETs APP_BASE_URL/health, which
+      # arrives as inbound traffic and resets the host's idle timer. Requires
+      # APP_BASE_URL set to this service's public URL; without it only the
+      # database half runs. Cannot prevent trial-expiry deletion or the free
+      # Postgres 30-day expiry -- only idle sleep.
+      - key: KEEPALIVE_ENABLED
+        value: "true"
+      - key: KEEPALIVE_INTERVAL
+        value: 1m
+
       # Connection pool. Kept well under the instance's connection ceiling:
       # exceeding max_connections turns a traffic spike into a hard outage,
       # whereas a bounded pool queues. Raise together with the database plan,
