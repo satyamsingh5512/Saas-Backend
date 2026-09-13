@@ -13,6 +13,7 @@ import (
 	"github.com/satym-in/tenant-saas-backend/internal/config"
 	"github.com/satym-in/tenant-saas-backend/internal/db"
 	"github.com/satym-in/tenant-saas-backend/internal/middleware"
+	"github.com/satym-in/tenant-saas-backend/internal/platform/keepalive"
 	"github.com/satym-in/tenant-saas-backend/internal/routes"
 )
 
@@ -35,6 +36,14 @@ func main() {
 	if err := db.MigrateAtStartup(cfg, database, logger); err != nil {
 		logger.Error("failed to run migrations", slog.Any("error", err))
 		os.Exit(1)
+	}
+
+	// Free-tier hosting spins down without inbound traffic and managed
+	// databases reap idle pools; the keep-alive pings both on a ticker.
+	// Stopped first on shutdown so it never races the pool close below.
+	var stopKeepalive func()
+	if cfg.KeepaliveEnabled {
+		stopKeepalive = keepalive.Start(database, cfg.AppBaseURL, cfg.KeepaliveInterval, logger)
 	}
 
 	server := &http.Server{
@@ -75,6 +84,10 @@ func main() {
 
 	case sig := <-shutdown:
 		logger.Info("shutdown initiated", slog.String("signal", sig.String()))
+
+		if stopKeepalive != nil {
+			stopKeepalive()
+		}
 
 		ctx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
 		defer cancel()
