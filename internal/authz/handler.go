@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/satym-in/tenant-saas-backend/pkg/apiresponse"
 	"github.com/satym-in/tenant-saas-backend/pkg/apperror"
+	"github.com/satym-in/tenant-saas-backend/pkg/reqctx"
 )
 
 // Handler is the thin Gin binding layer for role/permission administration.
@@ -24,19 +25,11 @@ func NewHandler(svc *Service) *Handler {
 	return &Handler{svc: svc}
 }
 
-func respondErr(c *gin.Context, err error) {
-	if appErr, ok := apperror.As(err); ok {
-		apiresponse.Error(c, appErr.Code.HTTPStatus(), string(appErr.Code), appErr.Message)
-		return
-	}
-	apiresponse.Error(c, http.StatusInternalServerError, string(apperror.CodeInternal), "internal server error")
-}
-
 // ListRoles handles GET /api/v1/roles.
 func (h *Handler) ListRoles(c *gin.Context) {
 	roles, err := h.svc.ListRoles(c.Request.Context())
 	if err != nil {
-		respondErr(c, err)
+		reqctx.RespondError(c, err)
 		return
 	}
 	apiresponse.Success(c, http.StatusOK, roles)
@@ -47,7 +40,7 @@ func (h *Handler) ListRoles(c *gin.Context) {
 func (h *Handler) ListPermissionCatalog(c *gin.Context) {
 	perms, err := h.svc.ListPermissionCatalog(c.Request.Context())
 	if err != nil {
-		respondErr(c, err)
+		reqctx.RespondError(c, err)
 		return
 	}
 	apiresponse.Success(c, http.StatusOK, perms)
@@ -75,7 +68,7 @@ func (h *Handler) CreateRole(c *gin.Context) {
 
 	role, err := h.svc.CreateRole(c.Request.Context(), tenantID, actorID, req.Name, req.Description, req.PermissionCodes)
 	if err != nil {
-		respondErr(c, err)
+		reqctx.RespondError(c, err)
 		return
 	}
 	apiresponse.Success(c, http.StatusCreated, role)
@@ -120,7 +113,7 @@ func (h *Handler) GetRolePermissions(c *gin.Context) {
 
 	permissions, err := h.svc.GetRolePermissions(c.Request.Context(), roleID)
 	if err != nil {
-		respondErr(c, err)
+		reqctx.RespondError(c, err)
 		return
 	}
 	c.Header("ETag", `"`+permissions.Revision+`"`)
@@ -179,7 +172,7 @@ func (h *Handler) UpdateRolePermissions(c *gin.Context) {
 		c.Request.Context(), tenantID, actorID, roleID, *req.PermissionCodes, expectedRevision,
 	)
 	if err != nil {
-		respondErr(c, err)
+		reqctx.RespondError(c, err)
 		return
 	}
 	c.Header("ETag", `"`+permissions.Revision+`"`)
@@ -204,7 +197,7 @@ func (h *Handler) DeleteRole(c *gin.Context) {
 		return
 	}
 	if err := h.svc.DeleteRole(c.Request.Context(), actorID, roleID); err != nil {
-		respondErr(c, err)
+		reqctx.RespondError(c, err)
 		return
 	}
 	apiresponse.Success(c, http.StatusOK, gin.H{"message": "role deleted"})
@@ -230,7 +223,7 @@ func (h *Handler) AssignRole(c *gin.Context) {
 	}
 
 	if err := h.svc.AssignRole(c.Request.Context(), tenantID, req.UserID, req.RoleID, assignerID); err != nil {
-		respondErr(c, err)
+		reqctx.RespondError(c, err)
 		return
 	}
 	apiresponse.Success(c, http.StatusOK, gin.H{"message": "role assigned"})
@@ -251,7 +244,7 @@ func (h *Handler) RevokeRole(c *gin.Context) {
 	}
 
 	if err := h.svc.RevokeRole(c.Request.Context(), tenantID, actorID, req.UserID, req.RoleID); err != nil {
-		respondErr(c, err)
+		reqctx.RespondError(c, err)
 		return
 	}
 	apiresponse.Success(c, http.StatusOK, gin.H{"message": "role revoked"})
