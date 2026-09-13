@@ -1,0 +1,47 @@
+- generic [active] [ref=f1e1]:
+  - link "Skip to content" [ref=f1e2] [cursor=pointer]:
+    - /url: "#main"
+  - status [ref=f1e3]
+  - generic [ref=f1e4]:
+    - complementary [ref=f1e5]:
+      - generic [ref=f1e6]:
+        - generic [ref=f1e7]:
+          - generic [aria-hidden] [ref=f1e8]: H
+          - generic [ref=f1e9]: HackerRank
+        - paragraph [ref=f1e10]: The organization layer every B2B product needs before feature one.
+        - paragraph [ref=f1e11]: Tenants, roles, teams, projects, invitations, API keys, quotas, and an append-only audit trail — one deployment, one database, many customers.
+        - list [ref=f1e12]:
+          - listitem [ref=f1e13]:
+            - generic [ref=f1e16]: Isolation enforced by PostgreSQL row-level security, not by application code alone
+          - listitem [ref=f1e17]:
+            - generic [ref=f1e20]: "Database-driven RBAC: 5 roles and 21 permissions, editable per workspace"
+          - listitem [ref=f1e21]:
+            - generic [ref=f1e24]: Refresh-token rotation with reuse detection, and scoped machine credentials
+          - listitem [ref=f1e25]:
+            - generic [ref=f1e28]: Seat and project quotas enforced at the plan boundary
+        - paragraph [ref=f1e29]: "This dashboard ships inside the API binary: no separate frontend build, no CDN, and no third-party origin contacted at runtime."
+    - main [ref=f1e30]:
+      - button "Toggle theme" [ref=f1e31] [cursor=pointer]
+      - generic [ref=f1e34]:
+        - heading "Sign in" [level=1] [ref=f1e35]
+        - paragraph [ref=f1e36]: Enter your credentials to continue.
+        - generic [ref=f1e37]:
+          - generic [ref=f1e38]:
+            - generic [ref=f1e39]: Email
+            - textbox "Email" [ref=f1e40]:
+              - /placeholder: you@company.com
+          - generic [ref=f1e41]:
+            - generic [ref=f1e42]:
+              - generic [ref=f1e43]: Password
+              - button "Show" [ref=f1e44] [cursor=pointer]
+            - textbox "Password" [ref=f1e45]:
+              - /placeholder: ••••••••
+          - generic [ref=f1e46]:
+            - generic [ref=f1e47]: Workspace optional
+            - textbox "Workspace optional" [ref=f1e48]:
+              - /placeholder: acme
+            - paragraph [ref=f1e49]: Only needed if your email belongs to more than one workspace
+          - button "Sign in" [ref=f1e50] [cursor=pointer]
+        - paragraph [ref=f1e51]:
+          - text: Don't have a workspace?
+          - button "Create one" [ref=f1e52] [cursor=pointer]
