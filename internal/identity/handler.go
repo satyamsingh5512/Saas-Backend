@@ -8,6 +8,7 @@ import (
 	"github.com/satym-in/tenant-saas-backend/internal/authz"
 	"github.com/satym-in/tenant-saas-backend/pkg/apiresponse"
 	"github.com/satym-in/tenant-saas-backend/pkg/apperror"
+	"github.com/satym-in/tenant-saas-backend/pkg/reqctx"
 )
 
 // Handler is the thin Gin binding layer for the identity module: it parses
@@ -22,14 +23,6 @@ func NewHandler(svc *Service) *Handler {
 	return &Handler{svc: svc}
 }
 
-func respondErr(c *gin.Context, err error) {
-	if appErr, ok := apperror.As(err); ok {
-		apiresponse.Error(c, appErr.Code.HTTPStatus(), string(appErr.Code), appErr.Message)
-		return
-	}
-	apiresponse.Error(c, http.StatusInternalServerError, string(apperror.CodeInternal), "internal server error")
-}
-
 // Register handles POST /api/v1/auth/register.
 func (h *Handler) Register(c *gin.Context) {
 	var req RegisterRequest
@@ -40,7 +33,7 @@ func (h *Handler) Register(c *gin.Context) {
 
 	resp, err := h.svc.Register(c.Request.Context(), req)
 	if err != nil {
-		respondErr(c, err)
+		reqctx.RespondError(c, err)
 		return
 	}
 	apiresponse.Success(c, http.StatusCreated, resp)
@@ -56,7 +49,7 @@ func (h *Handler) Login(c *gin.Context) {
 
 	resp, err := h.svc.Login(c.Request.Context(), req)
 	if err != nil {
-		respondErr(c, err)
+		reqctx.RespondError(c, err)
 		return
 	}
 	apiresponse.Success(c, http.StatusOK, resp)
@@ -72,7 +65,7 @@ func (h *Handler) Refresh(c *gin.Context) {
 
 	tokens, err := h.svc.Refresh(c.Request.Context(), req)
 	if err != nil {
-		respondErr(c, err)
+		reqctx.RespondError(c, err)
 		return
 	}
 	apiresponse.Success(c, http.StatusOK, tokens)
@@ -110,7 +103,7 @@ func (h *Handler) ResetPassword(c *gin.Context) {
 		return
 	}
 	if err := h.svc.ResetPassword(c.Request.Context(), req); err != nil {
-		respondErr(c, err)
+		reqctx.RespondError(c, err)
 		return
 	}
 	apiresponse.Success(c, http.StatusOK, gin.H{"message": "password has been reset"})
@@ -124,7 +117,7 @@ func (h *Handler) RequestEmailVerification(c *gin.Context) {
 		return
 	}
 	if err := h.svc.RequestEmailVerification(c.Request.Context(), tenantID, userID); err != nil {
-		respondErr(c, err)
+		reqctx.RespondError(c, err)
 		return
 	}
 	apiresponse.Success(c, http.StatusOK, gin.H{"message": "verification email sent"})
@@ -138,7 +131,7 @@ func (h *Handler) VerifyEmail(c *gin.Context) {
 		return
 	}
 	if err := h.svc.VerifyEmail(c.Request.Context(), req); err != nil {
-		respondErr(c, err)
+		reqctx.RespondError(c, err)
 		return
 	}
 	apiresponse.Success(c, http.StatusOK, gin.H{"message": "email verified"})
@@ -152,7 +145,7 @@ func (h *Handler) Me(c *gin.Context) {
 		return
 	}
 	// c.Request.Context() already carries the tenant ID attached by
-	// tenancy.OverrideFromJWT inside RequireAuth, so repository calls made
+	// tenancy.OverrideFromCredential inside RequireAuth, so repository calls made
 	// with it are correctly RLS-scoped without re-deriving anything here.
 	user, err := h.svc.repo.FindByID(c.Request.Context(), userID)
 	if err != nil {
@@ -175,14 +168,14 @@ func requesterIDs(c *gin.Context) (userID, tenantID uuid.UUID, ok bool) {
 
 // ListUsers handles GET /api/v1/users (authenticated): lists users in the
 // caller's tenant. Tenant scoping comes strictly from the JWT claim via
-// RequireAuth + tenancy.OverrideFromJWT, never from client-supplied input.
+// RequireAuth + tenancy.OverrideFromCredential, never from client-supplied input.
 func (h *Handler) ListUsers(c *gin.Context) {
 	page := parseIntQuery(c, "page", 1)
 	pageSize := parseIntQuery(c, "page_size", 20)
 
 	users, total, err := h.svc.ListUsers(c.Request.Context(), page, pageSize)
 	if err != nil {
-		respondErr(c, err)
+		reqctx.RespondError(c, err)
 		return
 	}
 	apiresponse.SuccessPaginated(c, users, apiresponse.NewPagination(page, pageSize, total))
@@ -222,7 +215,7 @@ func (h *Handler) OAuthAuthorize(c *gin.Context) {
 
 	url, err := h.svc.OAuthAuthorizeURL(provider, tenantSlug)
 	if err != nil {
-		respondErr(c, err)
+		reqctx.RespondError(c, err)
 		return
 	}
 	c.Redirect(http.StatusTemporaryRedirect, url)
@@ -242,7 +235,7 @@ func (h *Handler) OAuthCallback(c *gin.Context) {
 
 	resp, err := h.svc.OAuthCallback(c.Request.Context(), provider, code, state)
 	if err != nil {
-		respondErr(c, err)
+		reqctx.RespondError(c, err)
 		return
 	}
 	apiresponse.Success(c, http.StatusOK, resp)
