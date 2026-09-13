@@ -34,15 +34,17 @@
 :root {
   color-scheme: light dark;
 
-  /* Brand — indigo. One accent; every state derives from these steps. */
-  --brand-50: #eef0fb;
-  --brand-100: #dde0f7;
-  --brand-200: #b9c0ef;
-  --brand-300: #a5b4fc;
-  --brand-500: #7b85dc;
-  --brand-600: #5e6ad2;
-  --brand-700: #4a56c0;
-  --brand-800: #3a45a8;
+  /* Brand — HackerRank green (from Figma Hack-1/Hack-2: accent #2EC866).
+     One accent; every state derives from these steps. --brand-600 is deepened
+     so white button text keeps 3:1+ contrast; --brand-300 is the dark-mode ink. */
+  --brand-50: #eafbef;
+  --brand-100: #d6f5df;
+  --brand-200: #a9e9bd;
+  --brand-300: #6fd795;
+  --brand-500: #2ec866;
+  --brand-600: #1da851;
+  --brand-700: #157a3c;
+  --brand-800: #0f5c2e;
 
   /* Neutral ramp — cool slate, ordered by elevation rather than lightness:
      n-0 is paper, n-50 is the recessed canvas, n-100/200 are fills,
@@ -127,8 +129,10 @@
   --err-bg: color-mix(in srgb, var(--err-fg) 12%, var(--surface));
   --info-bg: color-mix(in srgb, var(--info-fg) 12%, var(--surface));
 
-  /* Type */
-  --sans: "Inter", "Geist", -apple-system, BlinkMacSystemFont, "Segoe UI",
+  /* Type — Poppins first per the HackerRank Figma (Poppins/Montserrat), with no
+     webfont download: font-src is 'self', so an absent Poppins falls back to
+     the system stack with identical metrics handling. */
+  --sans: "Poppins", "Inter", "Geist", -apple-system, BlinkMacSystemFont, "Segoe UI",
     "SF Pro Text", system-ui, sans-serif;
   --mono: "JetBrains Mono", "SF Mono", ui-monospace, Menlo, Consolas, monospace;
 
@@ -343,8 +347,8 @@
      the only colour on that panel, and any base tint mutes them. */
   --art-ink: #000000;
 
-  /* Layout */
-  --sidebar: 252px;
+  /* Layout — sidebar is 268px per the Figma Hack-1/Hack-2 frames. */
+  --sidebar: 268px;
   --topbar: 52px;
   --max: 1440px;
   --skeleton: linear-gradient(90deg, var(--n-100) 25%, var(--n-200) 50%, var(--n-100) 75%);
@@ -419,10 +423,12 @@
 
     /* Overlays float above the card plane, so they step up from it, not down.
        The frame does the opposite: --chrome is below the canvas so the topbar
-       recedes and the content plane is the brightest thing on screen. */
-    --elevated: #1c1c1c;
-    --chrome: #090909;
-    --control: #1c1c1c;
+       recedes and the content plane is the brightest thing on screen.
+       HackerRank values from Figma Hack-1: sidebar/frame #0d0d0d, cards and
+       overlays #252836, controls one step up at #353340. */
+    --elevated: #252836;
+    --chrome: #0d0d0d;
+    --control: #353340;
 
     --brand-fg: var(--brand-300);
 
@@ -474,9 +480,9 @@
   --n-800: #ebebeb;
   --n-900: #f7f7f7;
 
-  --elevated: #1c1c1c;
-  --chrome: #090909;
-  --control: #1c1c1c;
+  --elevated: #252836;
+  --chrome: #0d0d0d;
+  --control: #353340;
 
   --brand-fg: var(--brand-300);
 
@@ -1552,6 +1558,107 @@ table, .num, .mono, .kpi__value, .kbd { font-variant-numeric: tabular-nums; }
   .auth__title { font-size: var(--fs-20); }
   /* Row actions never hide on touch: there is no hover to bring them back. */
   .row-actions { opacity: 1; }
+}
+
+/* ─────────────── HackerRank theme (Figma Hack-1/Hack-2) ─────────────── */
+
+/* Inspired-by, original code: same layout language as the Community file —
+   268px dark rail, 20px course cards, green active pill — with no copied
+   assets. Figma literals referenced: page #1f1d2b, rail #0d0d0d, card
+   #252836, card-deep #242730, muted #808191, pale #b7b9d2, accent #2ec866,
+   star #ffcd00, track #353340. Poppins is first in --sans (no download). */
+
+.logo__mark {
+  display: inline-grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  background: var(--brand-500);
+  color: #06130b;
+  font-weight: 700;
+  font-size: var(--fs-15);
+}
+
+.hr-grid {
+  display: grid;
+  gap: var(--sp-16);
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1.6fr);
+}
+
+.hr-card {
+  background: var(--elevated);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  padding: var(--sp-20);
+}
+
+.hr-card__title {
+  font-size: var(--fs-20);
+  font-weight: 500;
+  letter-spacing: -0.01em;
+}
+
+.hr-course {
+  overflow: hidden;
+  border-radius: 20px;
+  background: var(--elevated);
+  border: 1px solid var(--border);
+}
+
+.hr-course__swatch {
+  height: 96px;
+  background: var(--control);
+}
+
+.hr-course__body {
+  padding: var(--sp-12) var(--sp-14);
+}
+
+.hr-course__name {
+  font-size: var(--fs-15);
+  color: var(--fg);
+}
+
+.hr-course__meta {
+  margin-top: var(--sp-2);
+  font-size: var(--fs-12);
+  color: var(--fg-muted);
+}
+
+.hr-stars {
+  color: #ffcd00;
+  letter-spacing: 0.08em;
+}
+
+.hr-pill {
+  display: inline-flex;
+  align-items: center;
+  height: 26px;
+  padding: 0 var(--sp-10);
+  border-radius: var(--r-full);
+  background: var(--control);
+  font-size: var(--fs-12);
+  color: var(--fg);
+}
+
+.sidebar {
+  background: var(--chrome);
+}
+
+.nav__item[aria-current="page"] {
+  background: var(--brand-500);
+  color: #06130b;
+}
+
+.nav__item[aria-current="page"] .icon {
+  color: currentColor;
+}
+
+@media (max-width: 1100px) {
+  .hr-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 /* ─────────────────────────── Forced colours ─────────────────────────── */
