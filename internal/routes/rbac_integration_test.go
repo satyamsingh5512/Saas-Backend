@@ -162,7 +162,9 @@ func TestRBAC_RolePermissionEditingIsLosslessAndTenantScoped(t *testing.T) {
 
 	guestA := findRoleID(tokenA, "guest")
 	initial := getGrants(tokenA, guestA)
-	seeded := []string{"org:view", "member:view", "team:view", "project:view"}
+	// Guest is read-only, including file view (see migrations/000015's seed
+	// trigger and the README role table).
+	seeded := []string{"org:view", "member:view", "team:view", "project:view", "file:view"}
 	if initial.RoleID != guestA || initial.Revision == "" || !equalCodes(initial.PermissionCodes, seeded) {
 		t.Fatalf("unexpected seeded grants: %+v", initial)
 	}
