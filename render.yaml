@@ -108,18 +108,13 @@ services:
         value: 168h
 
       # Redis caching (free tier works: Render Key Value, Upstash, etc.).
-      # Create the instance once, then paste its values here; Render preserves
-      # sync:false entries across deploys. Format is host:port (no scheme).
-      # Empty REDIS_ADDR disables caching gracefully -- every check queries
-      # Postgres instead, which is correct but slower. A sleeping or
-      # unreachable Redis is equally safe: reads fail open to a miss, so the
-      # only symptom is uncached latency until it answers again.
-      - key: REDIS_ADDR
+      # Paste the provider connection string as redis:// or rediss://. Render
+      # preserves this sync:false secret across deploys. An empty REDIS_URL
+      # disables caching gracefully -- every check queries Postgres instead,
+      # which is correct but slower. A sleeping or unreachable Redis is
+      # equally safe: reads fail open to a miss, so only latency changes.
+      - key: REDIS_URL
         sync: false
-      - key: REDIS_PASSWORD
-        sync: false
-      - key: REDIS_DB
-        value: "0"
 
       # Keep-alive against free-tier idle sleep. Every KEEPALIVE_INTERVAL the
       # server pings the database pool and GETs APP_BASE_URL/health, which
