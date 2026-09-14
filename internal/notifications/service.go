@@ -12,10 +12,32 @@ import (
 // Service implements notification reads, acknowledgement, and internal delivery.
 type Service struct {
 	repo *Repository
+	// publisher fans persisted notifications out to live SSE subscribers
+	// (internal/realtime, wired in routes.Setup). Nil by default: delivery
+	// to the database is the guarantee; live fan-out is best-effort.
+	// It is invoked synchronously after a successful persist, and must
+	// never fail the Notify call -- see Broker.Publish.
+	publisher func(ctx context.Context, n Notification)
 }
 
 func NewService(repo *Repository) *Service {
 	return &Service{repo: repo}
+}
+
+// SetPublisher registers the live-delivery fan-out. Called once at startup.
+func (s *Service) SetPublisher(publisher func(ctx context.Context, n Notification)) {
+	s.publisher = publisher
+}
+
+// publish forwards one persisted notification to live subscribers, if any.
+// Panics in a publisher are contained so a transport bug can never fail
+// the already-committed database write it follows.
+func (s *Service) publish(ctx context.Context, n Notification) {
+	if s.publisher == nil {
+		return
+	}
+	defer func() { _ = recover() }()
+	s.publisher(ctx, n)
 }
 
 // NotifyInput describes a notification to deliver to one user.
@@ -52,6 +74,7 @@ func (s *Service) Notify(ctx context.Context, in NotifyInput) error {
 	if err := s.repo.Create(ctx, n); err != nil {
 		return apperror.Wrap(apperror.CodeInternal, "failed to create notification", err)
 	}
+	s.publish(ctx, *n)
 	return nil
 }
 
@@ -81,6 +104,9 @@ func (s *Service) NotifyMany(ctx context.Context, tenantID uuid.UUID, userIDs []
 
 	if err := s.repo.CreateBatch(ctx, tenantID, rows); err != nil {
 		return apperror.Wrap(apperror.CodeInternal, "failed to create notifications", err)
+	}
+	for _, n := range rows {
+		s.publish(ctx, n)
 	}
 	return nil
 }
