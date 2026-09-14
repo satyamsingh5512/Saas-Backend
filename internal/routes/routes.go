@@ -1,12 +1,14 @@
 package routes
 
 import (
+	"context"
 	"embed"
 	"io/fs"
 	"net/http"
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/satym-in/tenant-saas-backend/internal/admin"
 	"github.com/satym-in/tenant-saas-backend/internal/apikeys"
 	"github.com/satym-in/tenant-saas-backend/internal/audit"
 	"github.com/satym-in/tenant-saas-backend/internal/authz"
@@ -20,8 +22,11 @@ import (
 	"github.com/satym-in/tenant-saas-backend/internal/notifications"
 	"github.com/satym-in/tenant-saas-backend/internal/platform"
 	"github.com/satym-in/tenant-saas-backend/internal/platform/cache"
+	"github.com/satym-in/tenant-saas-backend/internal/platform/metrics"
+	"github.com/satym-in/tenant-saas-backend/internal/platform/swagger"
 	"github.com/satym-in/tenant-saas-backend/internal/preferences"
 	"github.com/satym-in/tenant-saas-backend/internal/projects"
+	"github.com/satym-in/tenant-saas-backend/internal/realtime"
 	"github.com/satym-in/tenant-saas-backend/internal/teams"
 	"github.com/satym-in/tenant-saas-backend/internal/tenancy"
 	"gorm.io/gorm"
@@ -64,11 +69,16 @@ func Setup(db *gorm.DB, cfg *config.Config) *gin.Engine {
 	router.Use(middleware.SecurityHeaders())
 	router.Use(middleware.CORS(cfg.CORSAllowedOrigins))
 
+	// --- Observability (registry first: every request below is counted) ---
+	registry := metrics.New()
+	metrics.DefaultObserver = registry
+	router.Use(registry.Middleware())
+
 	// --- Module wiring (dependency injection root) ---
 	// Redis caching is optional: an empty REDIS_URL (the default), invalid URL,
 	// or unreachable instance yields a nil cache, and both consumers degrade to
 	// querying Postgres on every check -- correct, just slower.
-	permissionCache := cache.New(cfg.RedisURL, appLogger)
+	permissionCache := cache.NewWithPoolSize(cfg.RedisURL, appLogger, cfg.RedisPoolSize)
 
 	tenantRepo := tenancy.NewRepository(db)
 	tenantResolver := tenancy.NewResolver(tenantRepo, permissionCache, cfg.TenantBaseDomain)
@@ -82,6 +92,15 @@ func Setup(db *gorm.DB, cfg *config.Config) *gin.Engine {
 
 	notificationService := notifications.NewService(notifications.NewRepository(db))
 	notificationHandler := notifications.NewHandler(notificationService)
+
+	// Live fan-out for the SSE stream: persisted first, published second.
+	// A nil broker (never here -- New always returns one) would simply mean
+	// no live delivery; the database remains the source of truth.
+	realtimeBroker := realtime.New(cfg.RedisURL, appLogger)
+	notificationService.SetPublisher(func(ctx context.Context, n notifications.Notification) {
+		realtimeBroker.PublishNotification(n.TenantID, n.UserID, n.ID, n.Type, n.Title, n.Body, n.CreatedAt)
+	})
+	realtimeHandler := realtime.NewHandler(realtimeBroker, registry)
 
 	billingService := billing.NewService(billing.NewRepository(db), auditService)
 	billingHandler := billing.NewHandler(billingService)
@@ -164,6 +183,8 @@ func Setup(db *gorm.DB, cfg *config.Config) *gin.Engine {
 
 	healthHandler := platform.NewHealthHandler(db)
 
+	adminHandler := admin.NewHandler(admin.NewService(db))
+
 	// 20 requests/minute per IP with a burst of 5 on unauthenticated endpoints, to
 	// slow credential stuffing and invite-token guessing without a shared store.
 	authLimiter := middleware.NewIPRateLimiter(20, 5)
@@ -173,6 +194,14 @@ func Setup(db *gorm.DB, cfg *config.Config) *gin.Engine {
 	router.GET("/health", healthHandler.Health)
 	router.GET("/health/ready", healthHandler.Ready)
 	router.GET("/health/live", healthHandler.Live)
+
+	// Operator observability is tenant-agnostic (aggregate counts only, no
+	// tenant PII) and sits before tenant resolution for the same reason.
+	// METRICS_TOKEN, when configured, gates the endpoint with a bearer check.
+	router.GET("/metrics", registry.Handler(db, cfg.StorageRoot, cfg.MetricsToken))
+
+	// API reference: static per deployment, no tenant context needed.
+	swagger.Register(router)
 
 	// The static documents and assets are registered before tenant resolution
 	// too, and for the same reason: they are identical for every tenant, so
@@ -239,6 +268,28 @@ func Setup(db *gorm.DB, cfg *config.Config) *gin.Engine {
 				notificationGroup.POST("/:notificationID/read", notificationHandler.MarkRead)
 				notificationGroup.DELETE("/:notificationID", notificationHandler.Delete)
 			}
+
+			// --- Live notification stream (SSE) ---
+			// Mounted OUTSIDE the protected group on purpose: the stream
+			// accepts the bearer token as ?access_token= for EventSource
+			// clients, and the promotion (QueryTokenAuth) must run BEFORE
+			// the credential middlewares, which a route-level handler on a
+			// protected-group route cannot do (group middleware always runs
+			// first). The auth chain here is identical -- same two
+			// middlewares, same validators -- only the transport bridge is
+			// added in front.
+			streamGroup := api.Group("/notifications")
+			streamGroup.Use(realtime.QueryTokenAuth())
+			streamGroup.Use(apikeys.Authenticate(apiKeyService))
+			streamGroup.Use(identity.RequireAuth(cfg.JWTSecret, identityService))
+			{
+				streamGroup.GET("/stream", realtimeHandler.Stream)
+			}
+
+			// --- Admin analytics: organization overview for org leadership ---
+			protected.GET("/admin/overview",
+				authzService.RequirePermission(authz.PermOrgView),
+				adminHandler.Overview)
 
 			// --- Members ---
 			protected.GET("/users",
