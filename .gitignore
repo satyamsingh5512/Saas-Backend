@@ -20,3 +20,6 @@
 .kiro/
 AGENTS.md
 
+# Local Playwright artifacts and OCI SSH credentials; never commit these.
+.playwright-mcp/
+
