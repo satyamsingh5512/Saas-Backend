@@ -1,47 +1,140 @@
+# Production stack for a single Oracle Cloud Always Free VM
+# (Ubuntu 24.04, 2 OCPU, 12 GB RAM): app + postgres + redis + nginx.
+#
+# Start it:  ./scripts/deploy_oracle.sh
+# The deploy script is the only supported entrypoint -- it validates secrets,
+# renders deploy/nginx/nginx.conf from DOMAIN, bootstraps TLS, then runs:
+#   docker compose -f docker-compose.production.yml up -d --build
+#
+# Conventions:
+#   - Secrets arrive ONLY as environment (ENV_FILE, default .env.production).
+#     Nothing secret is committed; compose interpolation fails fast on the
+#     required ones (${VAR:?message}).
+#   - `image:` + `pull_policy: ${APP_PULL_POLICY:-build}` lets CI deploy a
+#     prebuilt GHCR image (APP_IMAGE=ghcr.io/... APP_PULL_POLICY=missing)
+#     while local deploys build on the VM.
+#   - Only nginx publishes host ports. Postgres/redis live on the internal
+#     backend network; the app is reachable solely through the proxy.
+#   - Per-service logging rotation: a runaway log must never fill a free-tier
+#     boot volume.
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
   app:
+    image: ${APP_IMAGE:-tenant-saas-app:local}
     build:
       context: .
       dockerfile: Dockerfile
+    pull_policy: ${APP_PULL_POLICY:-build}
     restart: unless-stopped
     depends_on:
       postgres:
         condition: service_healthy
-    ports:
-      - "${PORT:-8080}:8080"
+      redis:
+        condition: service_healthy
+    networks:
+      - backend
+      - frontend
+    # Writable only where it must be: uploads live on a named volume, /tmp on
+    # tmpfs; the rest of the root filesystem is read-only (the distroless
+    # image ships no shell, so even a compromised process finds little to
+    # work with beyond its own address space).
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
     volumes:
-      - tenant_saas_uploads:/data/uploads
+      - uploads:/data/uploads
+    healthcheck:
+      # Mirrors the Dockerfile HEALTHCHECK; explicit here so compose can gate
+      # nginx startup on the app actually serving (migrations included).
+      test: ["CMD", "/tenant-saas", "-healthcheck"]
+      interval: 30s
+      timeout: 5s
+      start_period: 90s
+      retries: 3
     environment:
       APP_ENV: production
+      GIN_MODE: release
       PORT: "8080"
       DB_HOST: postgres
       DB_PORT: "5432"
-      # Runtime traffic must use the non-superuser role. Migrations use the
-      # separate MIGRATE_* credential below and are completed before serving.
+      # Runtime traffic uses the least-privilege role; migrations use the
+      # separate MIGRATE_* bootstrap credential and finish before serving.
       DB_USER: ${DB_USER:-app_user}
-      DB_PASSWORD: ${DB_PASSWORD:?Set the app_user DB_PASSWORD in the deployment environment}
+      DB_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD (app_user) in .env.production}
       DB_NAME: ${DB_NAME:-tenant_saas}
       DB_SSLMODE: disable
+      # Phase 2 pool sizing for 2 OCPU / Postgres max_connections=100:
+      # 20 app conns leave headroom for migrations, backups, and psql.
+      DB_MAX_OPEN_CONNS: ${DB_MAX_OPEN_CONNS:-20}
+      DB_MAX_IDLE_CONNS: ${DB_MAX_IDLE_CONNS:-5}
+      DB_CONN_MAX_LIFETIME: ${DB_CONN_MAX_LIFETIME:-30m}
+      DB_CONN_MAX_IDLE_TIME: ${DB_CONN_MAX_IDLE_TIME:-10m}
+      MIGRATE_DB_HOST: postgres
+      MIGRATE_DB_USER: postgres
+      MIGRATE_DB_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD (migration role) in .env.production}
+      JWT_SECRET: ${JWT_SECRET:?Set a long random JWT_SECRET in .env.production}
+      ACCESS_TOKEN_TTL: ${ACCESS_TOKEN_TTL:-15m}
+      REFRESH_TOKEN_TTL: ${REFRESH_TOKEN_TTL:-720h}
+      REDIS_URL: redis://:${REDIS_PASSWORD:?Set REDIS_PASSWORD in .env.production}@redis:6379/0
+      REDIS_POOL_SIZE: ${REDIS_POOL_SIZE:-20}
       STORAGE_DRIVER: local
       STORAGE_ROOT: /data/uploads
       MAX_UPLOAD_BYTES: ${MAX_UPLOAD_BYTES:-26214400}
-      MIGRATE_DB_HOST: postgres
-      MIGRATE_DB_USER: postgres
-      MIGRATE_DB_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD for the migration role}
-      JWT_SECRET: ${JWT_SECRET:?Set a long random JWT_SECRET in the deployment environment}
+      APP_BASE_URL: https://${DOMAIN:?Set DOMAIN in .env.production}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-}
+      TENANT_BASE_DOMAIN: ${TENANT_BASE_DOMAIN:-}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      MAIL_FROM: ${MAIL_FROM:-}
+      GITHUB_OAUTH_CLIENT_ID: ${GITHUB_OAUTH_CLIENT_ID:-}
+      GITHUB_OAUTH_CLIENT_SECRET: ${GITHUB_OAUTH_CLIENT_SECRET:-}
+      GITHUB_OAUTH_REDIRECT_URL: ${GITHUB_OAUTH_REDIRECT_URL:-}
+      METRICS_TOKEN: ${METRICS_TOKEN:-}
+      SHUTDOWN_TIMEOUT: 25s
+      # Free-tier idle sleep does not apply on a VM we own; keep-alive
+      # defaults to off here (explicit opt-in, unlike hosted previews).
+      KEEPALIVE_ENABLED: ${KEEPALIVE_ENABLED:-false}
+    deploy:
+      resources:
+        limits:
+          cpus: "1.50"
+          memory: 1G
+        reservations:
+          memory: 256M
+    logging: *default-logging
 
   postgres:
     image: postgres:16-alpine
     restart: unless-stopped
+    networks:
+      - backend
     environment:
-      # The bootstrap role owns the database and is used only for migrations.
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in the deployment environment}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env.production}
       POSTGRES_DB: ${DB_NAME:-tenant_saas}
-      APP_DB_USER: app_user
-      APP_DB_PASSWORD: ${DB_PASSWORD:?Set the app_user DB_PASSWORD in the deployment environment}
+      APP_DB_USER: ${DB_USER:-app_user}
+      APP_DB_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env.production}
+      # Small-VM tuning: app pool (20) + migrations + backups + headroom fit
+      # comfortably under 100; 256MB shared buffers suit a mixed workload on
+      # 12GB RAM without starving the OS page cache (which is where Postgres
+      # really caches reads).
+      POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256"
+    command: >
+      postgres
+      -c max_connections=100
+      -c shared_buffers=256MB
+      -c effective_cache_size=2GB
+      -c maintenance_work_mem=128MB
+      -c work_mem=8MB
+      -c checkpoint_completion_target=0.9
+      -c log_min_duration_statement=1000
+      -c log_connections=off
     volumes:
-      - tenant_saas_data:/var/lib/postgresql/data
+      - pgdata:/var/lib/postgresql/data
       - ./scripts/docker-init-app-role.sh:/docker-entrypoint-initdb.d/00-app-role.sh:ro
       - ./scripts/provision_app_role.sql:/docker-entrypoint-initdb.d/provision_app_role.sql:ro
     healthcheck:
@@ -49,8 +142,92 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          cpus: "1.00"
+          memory: 2G
+        reservations:
+          memory: 512M
+    logging: *default-logging
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    networks:
+      - backend
+    # Shell form is deliberate: it is the only way to expand REDIS_PASSWORD
+    # into --requirepass without baking the secret into the image or a file.
+    # The password stays quoted so special characters cannot break argv.
+    command: sh -c 'exec redis-server --requirepass "$$REDIS_PASSWORD" --maxmemory 256mb --maxmemory-policy allkeys-lru --appendonly yes --save "900 1 300 10"'
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?Set REDIS_PASSWORD in .env.production}
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a $$REDIS_PASSWORD ping | grep -q PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
       start_period: 10s
+    deploy:
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 384M
+        reservations:
+          memory: 128M
+    logging: *default-logging
+
+  nginx:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    depends_on:
+      app:
+        condition: service_healthy
+    networks:
+      - frontend
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      # Rendered by scripts/deploy_oracle.sh from deploy/nginx/nginx.conf
+      # (__DOMAIN__/__APP_HOST__ substituted); read-only at runtime.
+      - ./deploy/nginx/rendered.conf:/etc/nginx/nginx.conf:ro
+      # Certbot webroot for http-01 challenges + issued certificates.
+      - certbot-www:/var/www/certbot:ro
+      - /etc/letsencrypt:/etc/letsencrypt:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    deploy:
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 256M
+    logging: *default-logging
+
+networks:
+  # Public edge: nginx + app's proxy leg. Postgres/redis are NOT attached.
+  frontend:
+    driver: bridge
+  # Data plane: app <-> postgres <-> redis. internal:true blocks any direct
+  # route to the outside world -- even a misconfigured port mapping cannot
+  # expose the database, because the network itself has no gateway.
+  backend:
+    driver: bridge
+    internal: true
 
 volumes:
-  tenant_saas_data:
-  tenant_saas_uploads:
+  pgdata:
+    name: ${COMPOSE_PROJECT_NAME:-saas}_pgdata
+  redisdata:
+    name: ${COMPOSE_PROJECT_NAME:-saas}_redisdata
+  uploads:
+    name: ${COMPOSE_PROJECT_NAME:-saas}_uploads
+  certbot-www:
+    name: ${COMPOSE_PROJECT_NAME:-saas}_certbot_www
