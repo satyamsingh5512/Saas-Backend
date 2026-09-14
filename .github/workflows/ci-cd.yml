@@ -1,0 +1,186 @@
+# CI/CD: build -> test -> docker build -> push GHCR -> deploy to Oracle VM -> health check -> rollback.
+#
+# Required GitHub secrets:
+#   ORACLE_HOST        VM public IP or hostname (e.g. 129.146.x.x)
+#   ORACLE_USER        SSH user (ubuntu)
+#   ORACLE_SSH_KEY     Private key with access to the VM
+#   (GHCR push uses the built-in GITHUB_TOKEN -- no secret needed.)
+#
+# Optional secrets / variables:
+#   APP_IMAGE_BASE     e.g. ghcr.io/<owner>/tenant-saas-backend (default set below)
+#   HEALTH_URL         e.g. https://api.example.com/health/ready (defaults to https://<ORACLE_HOST>/health/ready... see deploy job)
+#
+# Rollback strategy (stated plainly): the VM keeps the previous GOOD image
+# tagged as :stable. A deploy pushes :<sha>, points the stack at it, and runs
+# end-to-end health checks; on failure it re-points at :stable and restarts.
+# There is no orchestrator to do this for us on a single VM, so the workflow
+# does it explicitly -- every step is visible in the job log.
+name: ci-cd
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  GO_VERSION: "1.26"
+  APP_IMAGE_BASE: ghcr.io/${{ github.repository }}
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+      - name: Compile
+        run: go build ./...
+      - name: Vet
+        run: go vet ./...
+
+  test:
+    name: Test (unit + Postgres/Redis integration)
+    runs-on: ubuntu-latest
+    needs: build
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: tenant_saas
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d tenant_saas"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping | grep PONG"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DB_HOST: localhost
+      DB_PORT: 5432
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      DB_NAME: tenant_saas
+      DB_SSLMODE: disable
+      MIGRATE_DB_USER: postgres
+      MIGRATE_DB_PASSWORD: postgres
+      JWT_SECRET: ci-test-secret-at-least-32-chars-long
+      TEST_REDIS_URL: redis://localhost:6379/0
+      REQUIRE_INTEGRATION_DB: 1
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+      - name: Provision app_user role (mirrors production least-privilege)
+        run: |
+          PGPASSWORD=postgres psql -h localhost -U postgres -d tenant_saas \
+            -v app_user_password='ci-app-user-password' -f scripts/provision_app_role.sql
+      - name: Run migrations (embedded, as the app does at startup)
+        run: go run ./cmd/migrate up
+      - name: Unit + integration tests
+        run: go test ./... -count=1
+
+  docker:
+    name: Docker build + push to GHCR
+    runs-on: ubuntu-latest
+    needs: test
+    # PRs still verify the image builds; only main pushes + deploys.
+    if: github.event_name != 'pull_request'
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image: ${{ steps.meta.outputs.image }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        run: echo "image=${APP_IMAGE_BASE,,}:${{ github.sha }}" >>"$GITHUB_OUTPUT"
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.image }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy:
+    name: Deploy to Oracle VM
+    runs-on: ubuntu-latest
+    needs: docker
+    if: github.ref == 'refs/heads/main'
+    env:
+      IMAGE: ${{ needs.docker.outputs.image }}
+    steps:
+      - name: Deploy over SSH (pull, cut over, verify, rollback on failure)
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.ORACLE_HOST }}
+          username: ${{ secrets.ORACLE_USER }}
+          key: ${{ secrets.ORACLE_SSH_KEY }}
+          command_timeout: 15m
+          envs: IMAGE
+          script: |
+            set -euo pipefail
+            cd ~/tenant-saas-backend
+            git pull --ff-only
+            echo "$IMAGE" > .deployed_image
+
+            # Log in to GHCR so the VM can pull the private image (PAT stored
+            # once on the VM as ~/.ghcr_pat by the operator -- never in git).
+            if [ -f ~/.ghcr_pat ]; then
+              echo "logging in to GHCR"
+              docker login ghcr.io -u "${{ github.actor }}" --password-stdin < ~/.ghcr_pat
+            fi
+
+            # Tag the CURRENT running image as the rollback target BEFORE pulling.
+            CURRENT="$(docker compose -f docker-compose.production.yml config --format json 2>/dev/null | grep -o '"image": *"[^"]*"' | head -1 || true)"
+            docker tag "${CURRENT:-tenant-saas-app:local}" tenant-saas-app:stable 2>/dev/null || true
+
+            # Cut over to the new image without rebuilding on the VM.
+            APP_IMAGE="$IMAGE" APP_PULL_POLICY=missing ./scripts/deploy_oracle.sh
+
+            # End-to-end health gate through the public hostname (fails -> rollback below).
+            source .env.production
+            for path in /health /health/ready /metrics /swagger; do
+              code="$(curl -sk -o /dev/null -w '%{http_code}' --max-time 15 "https://$DOMAIN$path")"
+              echo "GET $path -> $code"
+              [ "$code" = "200" ] || { echo "HEALTH GATE FAILED on $path"; exit 1; }
+            done
+            echo "DEPLOY OK: $IMAGE"
+
+      - name: Rollback on failure
+        if: failure()
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.ORACLE_HOST }}
+          username: ${{ secrets.ORACLE_USER }}
+          key: ${{ secrets.ORACLE_SSH_KEY }}
+          command_timeout: 10m
+          script: |
+            set -euo pipefail
+            cd ~/tenant-saas-backend
+            echo "deploy failed -- rolling back to :stable"
+            APP_IMAGE=tenant-saas-app:stable APP_PULL_POLICY=never \
+              docker compose -f docker-compose.production.yml --env-file .env.production up -d --no-build app
+            sleep 20
+            docker compose -f docker-compose.production.yml --env-file .env.production exec -T app /tenant-saas -healthcheck
+            echo "ROLLBACK COMPLETE -- app is serving the previous image"
