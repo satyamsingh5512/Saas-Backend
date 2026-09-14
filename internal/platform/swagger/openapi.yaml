@@ -1,0 +1,599 @@
+openapi: 3.0.3
+info:
+  title: Tenant SaaS Backend API
+  version: 1.0.0
+  description: |
+    Multi-tenant SaaS backend (Go, Gin, GORM, PostgreSQL RLS, Redis).
+
+    * All responses use the standard envelope `{success, data, meta}` or
+      `{success, error, meta}` where `meta.request_id` correlates with server logs.
+    * Authentication: `Authorization: Bearer <access_token>` (JWT, 15m) with
+      refresh-token rotation via `POST /api/v1/auth/refresh`, or an API key
+      (`Authorization: Bearer sk_live_...` / `X-API-Key`) with per-key scopes.
+    * Tenant scope comes from the validated credential; `X-Tenant-ID` is a
+      pre-auth hint only and a mismatched hint is rejected.
+    * Pagination: `?page=` / `?page_size=` (max 100).
+  contact:
+    name: API Support
+servers:
+  - url: /
+
+security:
+  - BearerAuth: []
+
+tags:
+  - name: auth
+    description: Registration, login, token rotation, password reset, OAuth
+  - name: admin
+    description: Organization analytics overview (requires org:view)
+  - name: notifications
+    description: User notification inbox, badge counts, and live SSE stream
+  - name: teams
+    description: Team management
+  - name: projects
+    description: Project management
+  - name: invitations
+    description: Member invitations (management + public accept flow)
+  - name: files
+    description: File uploads backed by local volume or S3
+  - name: api-keys
+    description: Scoped machine credentials
+  - name: billing
+    description: Plans, subscription, and quota usage
+  - name: audit
+    description: Compliance audit log and activity feed
+  - name: system
+    description: Health probes and Prometheus metrics
+
+paths:
+  /health:
+    get:
+      tags: [system]
+      summary: Liveness-friendly health check
+      security: []
+      responses:
+        '200':
+          description: Process is up
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessEnvelope'
+  /metrics:
+    get:
+      tags: [system]
+      summary: Prometheus metrics
+      description: |
+        Prometheus text exposition: request volume/latency, cache hit rate,
+        domain counts (tenants, users, projects, ...), storage and DB-pool
+        gauges. Requires `Authorization: Bearer <METRICS_TOKEN>` only when
+        METRICS_TOKEN is configured; otherwise open for in-network scraping.
+      security: []
+      responses:
+        '200':
+          description: Metrics in Prometheus text format
+          content:
+            text/plain:
+              schema:
+                type: string
+  /swagger/openapi.yaml:
+    get:
+      tags: [system]
+      summary: This OpenAPI document
+      security: []
+      responses:
+        '200':
+          description: OpenAPI 3.0 YAML
+          content:
+            text/yaml:
+              schema:
+                type: string
+
+  /api/v1/auth/register:
+    post:
+      tags: [auth]
+      summary: Register a new organization and owner account
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [organization_name, email, password]
+              properties:
+                organization_name:
+                  type: string
+                  example: Acme Inc
+                email:
+                  type: string
+                  format: email
+                  example: owner@acme.com
+                password:
+                  type: string
+                  format: password
+                  minLength: 8
+                  example: Correct-Horse-99
+                full_name:
+                  type: string
+                  example: Ada Owner
+      responses:
+        '201':
+          description: Organization created; tokens issued
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessEnvelope'
+              example:
+                success: true
+                data:
+                  access_token: eyJhbGciOiJIUzI1NiIs...
+                  refresh_token: 4fG8d...url-safe...
+                  token_type: Bearer
+                  expires_in: 900
+                meta:
+                  request_id: req_abc123
+
+  /api/v1/auth/login:
+    post:
+      tags: [auth]
+      summary: Sign in with email and password
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email:
+                  type: string
+                  format: email
+                  example: owner@acme.com
+                password:
+                  type: string
+                  format: password
+                  example: Correct-Horse-99
+                tenant_slug:
+                  type: string
+                  description: Required when the email exists in multiple organizations
+                  example: acme
+      responses:
+        '200':
+          description: Tokens issued
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/auth/refresh:
+    post:
+      tags: [auth]
+      summary: Rotate a refresh token
+      description: Refresh-token rotation with family reuse detection — a reused token revokes the whole family.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refresh_token]
+              properties:
+                refresh_token:
+                  type: string
+                  example: 4fG8d...url-safe...
+      responses:
+        '200':
+          description: New token pair issued
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessEnvelope'
+
+  /api/v1/admin/overview:
+    get:
+      tags: [admin]
+      summary: Organization analytics overview
+      description: Tenant-scoped dashboard snapshot for the caller's organization. Requires org:view.
+      responses:
+        '200':
+          description: Analytics snapshot
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessEnvelope'
+              example:
+                success: true
+                data:
+                  organization:
+                    id: 11111111-1111-1111-1111-111111111111
+                    name: Acme Inc
+                    slug: acme
+                    plan_code: pro
+                    status: active
+                  users:
+                    total: 48
+                    active: 45
+                    disabled: 3
+                    active_users_7d: 31
+                  teams: 6
+                  projects: 19
+                  invitations:
+                    pending: 4
+                    accepted_30d: 7
+                  api_keys:
+                    active: 9
+                    revoked: 2
+                    expired: 1
+                  storage:
+                    files: 212
+                    used_bytes: 187482112
+                  audit:
+                    events_30d: 1430
+                meta:
+                  request_id: req_abc123
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/notifications:
+    get:
+      tags: [notifications]
+      summary: List my notifications
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - name: unread_only
+          in: query
+          schema:
+            type: boolean
+      responses:
+        '200':
+          description: Paginated notifications
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessEnvelope'
+
+  /api/v1/notifications/unread-count:
+    get:
+      tags: [notifications]
+      summary: Unread badge count
+      responses:
+        '200':
+          description: Badge count
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessEnvelope'
+              example:
+                success: true
+                data:
+                  unread: 3
+
+  /api/v1/notifications/stream:
+    get:
+      tags: [notifications]
+      summary: Live notification stream (SSE)
+      description: |
+        Server-Sent Events stream. Emits `event: ready` on connect,
+        `event: notification` per delivery (refetch unread-count on each),
+        and `: ping` heartbeats every 25s. Reconnect with Last-Event-ID and
+        backfill from GET /notifications. Bearer token may be passed as
+        `?access_token=` for EventSource clients that cannot set headers.
+      parameters:
+        - name: access_token
+          in: query
+          description: Optional bearer token for EventSource clients
+          schema:
+            type: string
+      responses:
+        '200':
+          description: text/event-stream
+          content:
+            text/event-stream:
+              schema:
+                type: string
+                example: "event: notification\ndata: {\"id\":\"...\",\"title\":\"Added to project\"}\n\n"
+
+  /api/v1/teams:
+    get:
+      tags: [teams]
+      summary: List teams
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+      responses:
+        '200':
+          description: Paginated teams
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessEnvelope'
+    post:
+      tags: [teams]
+      summary: Create a team
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+                  example: Platform
+                description:
+                  type: string
+                  example: Owns the SaaS backend
+      responses:
+        '201':
+          description: Team created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessEnvelope'
+
+  /api/v1/projects:
+    get:
+      tags: [projects]
+      summary: List projects
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+      responses:
+        '200':
+          description: Paginated projects
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessEnvelope'
+    post:
+      tags: [projects]
+      summary: Create a project (plan quota enforced)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+                  example: Website relaunch
+                description:
+                  type: string
+                  example: Q4 marketing site
+                team_id:
+                  type: string
+                  format: uuid
+      responses:
+        '201':
+          description: Project created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessEnvelope'
+        '403':
+          description: Plan quota exceeded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+
+  /api/v1/files:
+    post:
+      tags: [files]
+      summary: Upload a file (plan storage quota enforced)
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+                project_id:
+                  type: string
+                  format: uuid
+      responses:
+        '201':
+          description: File stored
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessEnvelope'
+
+  /api/v1/api-keys:
+    get:
+      tags: [api-keys]
+      summary: List API keys
+      responses:
+        '200':
+          description: API keys (hashes never exposed)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessEnvelope'
+    post:
+      tags: [api-keys]
+      summary: Mint an API key (user session required)
+      description: The plaintext secret is returned exactly once and is unrecoverable afterward.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, scopes]
+              properties:
+                name:
+                  type: string
+                  example: CI deploy key
+                scopes:
+                  type: array
+                  items:
+                    type: string
+                  example: [project:view, file:upload]
+                expires_at:
+                  type: string
+                  format: date-time
+      responses:
+        '201':
+          description: Key minted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessEnvelope'
+              example:
+                success: true
+                data:
+                  key:
+                    id: 22222222-2222-2222-2222-222222222222
+                    name: CI deploy key
+                    key_prefix: sk_live_abC
+                    scopes: [project:view, file:upload]
+                  secret: sk_live_abC...one-time-plaintext...
+
+  /api/v1/billing/usage:
+    get:
+      tags: [billing]
+      summary: Current quota usage vs plan limits
+      responses:
+        '200':
+          description: Usage snapshot
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessEnvelope'
+              example:
+                success: true
+                data:
+                  plan_code: pro
+                  projects_used: 19
+                  projects_limit: 50
+                  seats_used: 48
+                  seats_limit: 100
+                  storage_bytes: 187482112
+                  storage_limit_bytes: 10737418240
+
+  /api/v1/audit-logs:
+    get:
+      tags: [audit]
+      summary: List compliance audit events (append-only)
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+      responses:
+        '200':
+          description: Paginated audit events
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessEnvelope'
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Short-lived access JWT, or an sk_live_ API key for machine clients
+
+  parameters:
+    Page:
+      name: page
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        default: 1
+    PageSize:
+      name: page_size
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
+
+  responses:
+    Unauthorized:
+      description: Missing, invalid, or expired credential
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+          example:
+            success: false
+            error:
+              code: UNAUTHORIZED
+              message: invalid or expired token
+            meta:
+              request_id: req_abc123
+    Forbidden:
+      description: Authenticated but lacking the required permission
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+
+  schemas:
+    SuccessEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          description: Endpoint-specific payload
+        meta:
+          type: object
+          properties:
+            request_id:
+              type: string
+              example: req_abc123
+            pagination:
+              type: object
+              properties:
+                page:
+                  type: integer
+                  example: 1
+                page_size:
+                  type: integer
+                  example: 20
+                total:
+                  type: integer
+                  example: 48
+                total_pages:
+                  type: integer
+                  example: 3
+    ErrorEnvelope:
+      type: object
+      required: [success, error]
+      properties:
+        success:
+          type: boolean
+          example: false
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              example: FORBIDDEN
+            message:
+              type: string
+              example: missing required permission
+        meta:
+          type: object
+          properties:
+            request_id:
+              type: string
