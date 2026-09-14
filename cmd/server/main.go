@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"errors"
+	"flag"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -17,7 +19,40 @@ import (
 	"github.com/satym-in/tenant-saas-backend/internal/routes"
 )
 
+// runHealthcheck probes the local /health endpoint and exits 0/1. It exists
+// for the Docker HEALTHCHECK in a distroless runtime image: distroless ships
+// no shell, wget, or curl, so a SHELL-form probe is impossible and an exec
+// probe needs a binary that speaks HTTP. The app binary is that binary:
+// `HEALTHCHECK CMD ["/tenant-saas", "-healthcheck"]`.
+func runHealthcheck() int {
+	check := flag.Bool("healthcheck", false, "probe the local /health endpoint and exit")
+	flag.Parse()
+	if !*check {
+		return -1 // not a healthcheck invocation; run the server normally
+	}
+	cfg := config.Load()
+	port := cfg.Port
+	if port == "" {
+		port = "8080"
+	}
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Get(fmt.Sprintf("http://127.0.0.1:%s/health", port))
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "healthcheck: "+err.Error())
+		return 1
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		fmt.Fprintf(os.Stderr, "healthcheck: unexpected status %d\n", resp.StatusCode)
+		return 1
+	}
+	return 0
+}
+
 func main() {
+	if code := runHealthcheck(); code >= 0 {
+		os.Exit(code)
+	}
 	cfg := config.Load()
 	logger := middleware.NewLogger(cfg.Environment)
 	slog.SetDefault(logger)
