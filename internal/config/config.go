@@ -113,6 +113,18 @@ type Config struct {
 	// RedisURL is an optional redis:// or rediss:// connection URL. An empty
 	// value disables caching gracefully.
 	RedisURL string
+
+	// RedisPoolSize bounds the go-redis connection pool. Sized for an
+	// Oracle Free Tier VM (2 OCPU): large enough to serve request-path
+	// permission/tenant lookups without queueing, small enough to leave
+	// Redis memory and file descriptors alone.
+	RedisPoolSize int
+
+	// MetricsToken optionally protects /metrics with a bearer token.
+	// Empty (the default) leaves /metrics open, which is correct behind
+	// a private network or an nginx allow-list; set it when /metrics is
+	// reachable from the public internet.
+	MetricsToken string
 }
 
 // Load reads configuration from a .env file (if present) and environment variables.
@@ -173,6 +185,9 @@ func Load() *Config {
 		S3Secure:       getEnvBool("S3_SECURE", true),
 
 		RedisURL: strings.TrimSpace(os.Getenv("REDIS_URL")),
+
+		RedisPoolSize: getEnvInt("REDIS_POOL_SIZE", 10),
+		MetricsToken:  strings.TrimSpace(os.Getenv("METRICS_TOKEN")),
 	}
 }
 
@@ -201,6 +216,12 @@ func (c *Config) Validate() error {
 	}
 	if c.DBUser == "" || c.DBPassword == "" || c.DBName == "" {
 		return fmt.Errorf("DB_USER, DB_PASSWORD, and DB_NAME are required when DATABASE_URL is not set in production")
+	}
+	if c.DBMaxOpenConns <= 0 || c.DBMaxIdleConns < 0 || c.DBMaxIdleConns > c.DBMaxOpenConns {
+		return fmt.Errorf("DB_MAX_OPEN_CONNS must be positive and DB_MAX_IDLE_CONNS must be between 0 and DB_MAX_OPEN_CONNS")
+	}
+	if c.RedisPoolSize <= 0 {
+		return fmt.Errorf("REDIS_POOL_SIZE must be positive")
 	}
 
 	return c.ValidateStorage()
