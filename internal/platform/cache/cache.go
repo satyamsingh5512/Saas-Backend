@@ -24,6 +24,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
+	"github.com/satym-in/tenant-saas-backend/internal/platform/metrics"
 	"github.com/satym-in/tenant-saas-backend/internal/tenancy"
 )
 
@@ -71,6 +72,17 @@ var (
 // unreachable Redis. All failures are warnings, not fatal, so services retain
 // their correct historic uncached behavior.
 func New(redisURL string, logger *slog.Logger) *Cache {
+	return NewWithPoolSize(redisURL, logger, DefaultPoolSize)
+}
+
+// DefaultPoolSize is the go-redis pool size used when the deployment does not
+// configure REDIS_POOL_SIZE. Sized for a small VM: request-path cache lookups
+// are sub-millisecond, so a modest pool saturates Redis long before it queues.
+const DefaultPoolSize = 10
+
+// NewWithPoolSize is New with an explicit connection-pool bound. A non-positive
+// poolSize falls back to DefaultPoolSize.
+func NewWithPoolSize(redisURL string, logger *slog.Logger, poolSize int) *Cache {
 	redisURL = strings.TrimSpace(redisURL)
 	if redisURL == "" {
 		return nil
@@ -89,7 +101,10 @@ func New(redisURL string, logger *slog.Logger) *Cache {
 	options.DialTimeout = 3 * time.Second
 	options.ReadTimeout = 2 * time.Second
 	options.WriteTimeout = 2 * time.Second
-	options.PoolSize = 10
+	if poolSize <= 0 {
+		poolSize = DefaultPoolSize
+	}
+	options.PoolSize = poolSize
 
 	client := redis.NewClient(options)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -119,12 +134,15 @@ func (c *Cache) GetTenantBySlug(ctx context.Context, slug string) (*tenancy.Tena
 	}
 	raw, err := c.client.Get(ctx, tenantKey(slug)).Bytes()
 	if err != nil {
+		metrics.ObserveMiss()
 		return nil, false
 	}
 	var tenant tenancy.Tenant
 	if err := json.Unmarshal(raw, &tenant); err != nil {
+		metrics.ObserveMiss()
 		return nil, false
 	}
+	metrics.ObserveHit()
 	return &tenant, true
 }
 
@@ -150,12 +168,15 @@ func (c *Cache) GetUserPermissions(ctx context.Context, tenantID, userID uuid.UU
 	}
 	raw, err := c.client.Get(ctx, permissionsKey(tenantID, userID)).Bytes()
 	if err != nil {
+		metrics.ObserveMiss()
 		return nil, false
 	}
 	var codes []string
 	if err := json.Unmarshal(raw, &codes); err != nil {
+		metrics.ObserveMiss()
 		return nil, false
 	}
+	metrics.ObserveHit()
 	return codes, true
 }
 
